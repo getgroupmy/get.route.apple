@@ -8,6 +8,9 @@ and then gets BusyError (the API answers 503).
 
 Chromium starts with the API (WARM_ON_START=1) or on the first lookup, and
 stays open. If it crashes, the next lookup starts a fresh one.
+
+Every page load goes through guard.py first (per-minute cap, random spacing,
+pause after a block), so the NAS's address isn't blocked by DuckDuckGo.
 """
 import asyncio
 import datetime
@@ -18,6 +21,7 @@ import time
 from playwright.async_api import async_playwright
 
 import config
+from guard import RateLimited, guard
 
 LAUNCH_ARGS = [
     "--no-sandbox",
@@ -29,6 +33,12 @@ LAUNCH_ARGS = [
     "--lang=en-US",
 ]
 SKIPPED_TYPES = {"image", "media", "font"}
+# What DuckDuckGo answers an address it has flagged as a bot.
+BLOCK_STATUSES = {202, 403, 429}
+BOT_CHECK_TEXTS = ("bots use duckduckgo too", "anomaly-modal", "complete the following challenge")
+
+
+__all__ = ["Browser", "BusyError", "RateLimited", "ScrapeError", "browser"]
 
 
 class BusyError(Exception):
@@ -40,8 +50,9 @@ class ScrapeError(Exception):
 
 
 class Browser:
-    def __init__(self, tabs=None):
+    def __init__(self, tabs=None, guard_=None):
         self.tabs = tabs or config.TABS
+        self.guard = guard_ or guard
         self._sem = asyncio.Semaphore(self.tabs)
         self._start_lock = asyncio.Lock()
         self._pw = self._browser = self._context = None
@@ -60,8 +71,14 @@ class Browser:
                 return
             await self._close_quietly()
             self._pw = await async_playwright().start()
+            proxy = None
+            if config.PROXY_SERVER:
+                proxy = {"server": config.PROXY_SERVER}
+                if config.PROXY_USERNAME:
+                    proxy.update(username=config.PROXY_USERNAME, password=config.PROXY_PASSWORD or "")
             self._browser = await self._pw.chromium.launch(
-                headless=config.HEADLESS, args=LAUNCH_ARGS, executable_path=config.CHROMIUM_PATH)
+                headless=config.HEADLESS, args=LAUNCH_ARGS, executable_path=config.CHROMIUM_PATH,
+                proxy=proxy)
             self._context = await self._browser.new_context(
                 user_agent=config.USER_AGENT, locale="en-US", viewport={"width": 1366, "height": 900})
             if config.BLOCK_IMAGES:
@@ -85,7 +102,9 @@ class Browser:
     # ---- lookups -----------------------------------------------------------------------------
 
     async def lookup(self, url, label="the trip"):
-        """Open [url] in a tab and return Apple Maps' directions answer (a dict)."""
+        """Open [url] in a tab and return Apple Maps' directions answer (a dict).
+        Raises RateLimited (no page load allowed now), BusyError or ScrapeError."""
+        self.guard.check()  # refuse at once while paused, before queueing for a tab
         try:
             await asyncio.wait_for(self._sem.acquire(), timeout=config.WAIT_FOR_BROWSER)
         except asyncio.TimeoutError:
@@ -93,6 +112,7 @@ class Browser:
                             f"{config.WAIT_FOR_BROWSER:g}s; try again")
         self.busy += 1
         try:
+            await self.guard.take()
             if not self.is_open():
                 await self.start()
             return await self._lookup(url, label)
@@ -126,14 +146,25 @@ class Browser:
             try:
                 # One budget for loading the page and waiting for the answer.
                 deadline = time.monotonic() + config.LOOKUP_TIMEOUT
-                await page.goto(url, wait_until="domcontentloaded",
-                                timeout=config.LOOKUP_TIMEOUT * 1000)
+                first = await page.goto(url, wait_until="domcontentloaded",
+                                        timeout=config.LOOKUP_TIMEOUT * 1000)
+                if first is not None and first.status in BLOCK_STATUSES:
+                    self.guard.blocked(f"page answered {first.status}")
+                    raise ScrapeError(f"DuckDuckGo refused the page ({first.status}): this "
+                                      f"address looks like a bot; pausing {config.BLOCK_COOLDOWN:g}s")
                 left = max(0.1, deadline - time.monotonic())
-                return await asyncio.wait_for(asyncio.shield(answer), timeout=left)
+                result = await asyncio.wait_for(asyncio.shield(answer), timeout=left)
+                self.guard.answered()
+                return result
             except asyncio.TimeoutError:
                 await save_debug(page, seen, label)
+                if await _is_bot_check(page):
+                    self.guard.blocked("bot check page")
+                    raise ScrapeError(f"DuckDuckGo showed a bot check for {label}; "
+                                      f"pausing {config.BLOCK_COOLDOWN:g}s")
+                self.guard.no_answer()
                 raise ScrapeError(f"Apple Maps did not answer within "
-                                   f"{config.LOOKUP_TIMEOUT:g}s for {label}")
+                                  f"{config.LOOKUP_TIMEOUT:g}s for {label}")
             except ScrapeError:
                 await save_debug(page, seen, label)
                 raise
@@ -158,6 +189,14 @@ class Browser:
             "launches_since_start": self.launches,
             "open_seconds": round(time.time() - self.started_at) if self.started_at and self.is_open() else None,
         }
+
+
+async def _is_bot_check(page):
+    try:
+        html = (await page.content()).lower()
+    except Exception:
+        return False
+    return any(t in html for t in BOT_CHECK_TEXTS)
 
 
 async def _skip_heavy(route):

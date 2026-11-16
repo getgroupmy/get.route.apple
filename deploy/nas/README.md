@@ -41,11 +41,43 @@ curl -s -H "X-Route-Key: $ROUTE_API_KEY" \
   `WAIT_FOR_BROWSER` (10 s), then gets a 503.
 - **Only the route is read.** Images, fonts and map tiles are skipped, which
   saves CPU and memory.
-- **A repeat** of the same trip within 60 s (`CACHE_SECONDS`) is answered
-  from memory.
+- **A repeat** of the same trip within 30 minutes (`CACHE_SECONDS`) is
+  answered from memory, without loading a page. Points within about 100 m
+  count as the same trip.
+- **DuckDuckGo's limits are respected** (see the next section): at most 20
+  page loads a minute, randomly spaced, and a pause after a block.
 - **Failures heal themselves.** If Chromium crashes, the next lookup starts
   a fresh one. Docker restarts the container if the API itself stops, and
   the image has a health check (Container Manager shows it).
+
+## Staying under DuckDuckGo's limits
+
+DuckDuckGo publishes no quota, but blocks an address that loads too many
+pages (roughly 20–30 a minute) with a 202, 403 or 429, or a bot check, for
+15 minutes to a few hours. Automated lookups are against its terms, so a
+block can come without warning. The container protects the NAS's address
+(which is also the office's address):
+
+| Setting | Default | What it does |
+|---|---|---|
+| `MAX_PER_MINUTE` | 20 | Most page loads in any 60 s. More are refused **at once** with a 503 and `Retry-After`, so GET.ride moves on to the AI instead of waiting. |
+| `PACE_MIN` / `PACE_MAX` | 0.5 / 1.5 s | Random gap between page loads, so they never come in an exact rhythm. Kept short because GET.ride waits only 3 s; a 2–5 s gap would make most lookups miss. |
+| `BLOCK_COOLDOWN` | 900 s | After a block (a 202/403/429 page, a bot-check page, or `BLOCK_AFTER_TIMEOUTS` = 3 lookups in a row with no answer), no page is loaded for 15 minutes. Retrying into a block makes it last longer. |
+| `CACHE_SECONDS` | 1800 s | Repeat trips are answered from memory for 30 minutes and cost no page load. |
+| `STALE_SECONDS` | 21600 s | While loads are paused, a trip asked in the last 6 hours is answered from memory with `"stale": true` instead of a 503. |
+| `PROXY_SERVER` | empty | Sends Chromium's traffic through a proxy or VPN (`http://…` or `socks5://…`, with `PROXY_USERNAME` / `PROXY_PASSWORD`). |
+
+`/health` (with the key) shows `duckduckgo`: page loads in the last
+minute, seconds left in a pause, the last block and how many lookups were
+refused. Cached answers don't count toward the cap. The memory cache is
+emptied when the container restarts.
+
+**Needing more than ~20 a minute.** Don't just raise `MAX_PER_MINUTE`: the
+block would land on the office's address. Either set `PROXY_SERVER` to a
+rotating residential proxy (paid; the provider's terms apply), or switch to
+Apple's official Maps Server API (Apple Developer Program, US$99 a year):
+it allows 25,000 calls a day with a documented 429 when over, and needs no
+browser at all.
 
 ## Memory on the DS224+
 

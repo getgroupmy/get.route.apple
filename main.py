@@ -23,7 +23,8 @@ from fastapi.responses import JSONResponse
 
 import config
 from apple_maps import NoRouteError, parse_directions, search_url
-from browser_client import BusyError, browser
+from browser_client import BusyError, RateLimited, browser
+from guard import guard
 
 OPEN_PATHS = {"/", "/health"}
 LATLNG = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
@@ -106,6 +107,15 @@ def _params(query, from_name="from", to_name="to"):
     return trip, None
 
 
+def _cache_key(trip):
+    """Trips whose points are within ~100 m (CACHE_DECIMALS) share an answer."""
+    def part(point, text):
+        if point["lat"] is not None:
+            return f"{point['lat']:.{config.CACHE_DECIMALS}f},{point['lng']:.{config.CACHE_DECIMALS}f}"
+        return text.lower()
+    return part(trip["from"], trip["from_text"]) + " -> " + part(trip["to"], trip["to_text"])
+
+
 def _fill(point, found):
     """Add Apple's coordinates to a place given by name."""
     if found and point["lat"] is None:
@@ -114,12 +124,18 @@ def _fill(point, found):
 
 
 async def _search(trip):
-    key = trip["url"]
+    key = _cache_key(trip)
     now = time.time()
     hit = _cache.get(key)
     if hit and config.CACHE_SECONDS > 0 and now - hit[0] < config.CACHE_SECONDS:
         return hit[1]
-    payload = await browser.lookup(trip["url"], label=f"{trip['from_text']} -> {trip['to_text']}")
+    try:
+        payload = await browser.lookup(trip["url"], label=f"{trip['from_text']} -> {trip['to_text']}")
+    except RateLimited:
+        # Paused: an older answer for this trip beats none.
+        if hit and config.STALE_SECONDS > 0 and now - hit[0] < config.STALE_SECONDS:
+            return dict(hit[1], stale=True)
+        raise
     routes, origin, destination = parse_directions(payload, trip["url"])
     result = {
         "from": _fill(trip["from"], origin),
@@ -133,8 +149,9 @@ async def _search(trip):
         "fetched_at": _iso(now),
     }
     _cache[key] = (now, result)
-    if len(_cache) > 1000:
-        for old in [k for k, (t, _) in _cache.items() if now - t >= config.CACHE_SECONDS] or list(_cache)[:100]:
+    if len(_cache) > 5000:
+        keep = max(config.CACHE_SECONDS, config.STALE_SECONDS)
+        for old in [k for k, (t, _) in _cache.items() if now - t >= keep] or list(_cache)[:500]:
             _cache.pop(old, None)
     return result
 
@@ -145,6 +162,9 @@ async def _answer(trip):
         result = await _search(trip)
     except NoRouteError as e:  # the trip, not the scraper: not a health error
         return None, JSONResponse({"error": f"apple maps rejected the request: {e}"}, status_code=400)
+    except RateLimited as e:  # paused to protect the address: not a health error
+        return None, JSONResponse({"error": str(e), "retry_after_seconds": e.retry_after}, status_code=503,
+                                  headers={"Retry-After": str(e.retry_after)})
     except BusyError as e:
         return None, JSONResponse({"error": str(e)}, status_code=503)
     except Exception as e:
@@ -179,6 +199,7 @@ async def directions(request: Request):
         "duration_minutes": round(best["duration_seconds"] / 60, 1),
         "duration_seconds": best["duration_seconds"],
         "source": "apple_maps",
+        **({"stale": True} if result.get("stale") else {}),
     })
 
 
@@ -203,6 +224,8 @@ async def health(request: Request):
         out["apple"] = recent
         out["waze"] = recent  # same block under GET.route's name, for callers that read it
         out["browser"] = browser.status()
+        out["duckduckgo"] = guard.status()
+        out["cached_trips"] = len(_cache)
     return JSONResponse(out)
 
 

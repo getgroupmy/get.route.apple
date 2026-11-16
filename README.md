@@ -69,6 +69,11 @@ between these places" is a 400, a wrong or missing key is a 401, every tab
 busy for 10 s is a 503, and a page that fails to load (or Apple not
 answering within 15 s) is a 500.
 
+Lookups paused to protect the address from DuckDuckGo's bot blocking (over
+20 a minute, or after a block) are a 503 with a `Retry-After` header; a trip
+asked in the last 6 hours is answered from memory instead, with
+`"stale": true`. See [Staying under DuckDuckGo's limits](deploy/nas/README.md#staying-under-duckduckgos-limits).
+
 ### Other endpoints
 
 - `GET /health`: always open, `{"status": "ok", ...}`. With the key it also
@@ -93,7 +98,7 @@ never behind a tunnel. `HEADLESS=0 uvicorn main:app` shows the browser.
 ## Tests
 
 ```bash
-python -m unittest test_apple_maps.py test_api.py test_browser.py
+python -m unittest test_guard.py test_apple_maps.py test_api.py test_browser.py
 ```
 
 `test_browser.py` drives a real Chromium against a local fake page (it is
@@ -105,6 +110,7 @@ skipped if Playwright's Chromium isn't installed); the others need no browser.
 |---|---|
 | `main.py` | The API (FastAPI): parameters, key, cache, answers |
 | `browser_client.py` | One Chromium, at most `TABS` tabs; reads Apple's answer from the network |
+| `guard.py` | Per-minute cap, random spacing and pause after a block |
 | `apple_maps.py` | Builds the search URL; turns Apple's answer into GET.route's fields |
 | `config.py` | Every setting, from environment variables |
 | `Dockerfile` | Microsoft's Playwright image (Chromium included) |
@@ -117,6 +123,9 @@ skipped if Playwright's Chromium isn't installed); the others need no browser.
   with "did not answer within 15s". The `debug/` folder then shows what the
   page did (see the NAS guide), and `SEARCH_URL` / `CAPTURE_PATTERN` can be
   changed in `.env` without a new build.
-- Check that this use fits DuckDuckGo's and Apple's terms for your app.
-  For an official route source, Apple's Maps Server API (with an Apple
-  Developer key) answers the same question without a browser.
+- Automated lookups are against DuckDuckGo's terms, and it blocks addresses
+  that make too many (roughly 20–30 a minute). The container caps itself at
+  20 a minute and pauses after a block, but a block can still come without
+  warning. For a dependable source, Apple's Maps Server API (Apple
+  Developer Program, US$99 a year, 25,000 calls a day) answers the same
+  question without a browser.

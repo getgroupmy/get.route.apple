@@ -28,7 +28,20 @@ services:
     environment:
       PORT: "8000"
       ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
-      CACHE_SECONDS: ${CACHE_SECONDS:-60}
+      # Repeat trips from memory (30 min), and older answers while paused.
+      CACHE_SECONDS: ${CACHE_SECONDS:-1800}
+      STALE_SECONDS: ${STALE_SECONDS:-21600}
+      # Keep the NAS's address under DuckDuckGo's bot limits (see README.md,
+      # "Staying under DuckDuckGo's limits").
+      MAX_PER_MINUTE: ${MAX_PER_MINUTE:-20}
+      PACE_MIN: ${PACE_MIN:-0.5}
+      PACE_MAX: ${PACE_MAX:-1.5}
+      BLOCK_COOLDOWN: ${BLOCK_COOLDOWN:-900}
+      BLOCK_AFTER_TIMEOUTS: ${BLOCK_AFTER_TIMEOUTS:-3}
+      # Optional: send Chromium through a proxy or VPN (empty = the NAS's own address).
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       # Tabs open at once = lookups answered at the same time. Each uses
       # roughly 150-250 MB on top of Chromium's own ~300 MB; see README.md.
       TABS: ${TABS:-2}

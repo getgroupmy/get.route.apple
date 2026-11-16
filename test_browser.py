@@ -14,14 +14,19 @@ import time
 import unittest
 
 import config
-from browser_client import Browser, BusyError, ScrapeError
+from browser_client import Browser, BusyError, RateLimited, ScrapeError
+from guard import Guard
 
 ANSWER = {"routes": [{"name": "E7", "distanceMeters": 48213, "expectedTravelTimeSeconds": 2940}]}
 
 
 class FakeSite(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.startswith("/search"):
+        if self.path.startswith("/search?blocked"):
+            self._send(429, "text/html", b"slow down")
+        elif self.path.startswith("/search?botcheck"):
+            self._send(200, "text/html", b"<div class='anomaly-modal'>Unfortunately, bots use DuckDuckGo too.</div>")
+        elif self.path.startswith("/search"):
             body = b"""<html><body>maps<img src="/tile.png"><script>
               setTimeout(() => fetch('/v1/directions' + location.search), 200);
             </script></body></html>"""
@@ -77,6 +82,7 @@ class BrowserTest(unittest.TestCase):
         config.CAPTURE_PATTERN = r"/v1/directions"
         config.LOOKUP_TIMEOUT = 5
         config.WAIT_FOR_BROWSER = 0.5
+        self.guard = Guard(per_minute=0, pace=(0, 0), cooldown=900, after_timeouts=0)
         self.tmp = tempfile.TemporaryDirectory()
         config.DEBUG_DIR = self.tmp.name
 
@@ -90,7 +96,7 @@ class BrowserTest(unittest.TestCase):
 
     def test_lookup_reads_the_directions_answer(self):
         async def go():
-            b = Browser(tabs=2)
+            b = Browser(tabs=2, guard_=self.guard)
             try:
                 first = await b.lookup(self.base + "/search?q=a")
                 again = await b.lookup(self.base + "/search?q=b")  # same Chromium, new tab
@@ -105,7 +111,7 @@ class BrowserTest(unittest.TestCase):
 
     def test_error_answer_and_debug_dump(self):
         async def go():
-            b = Browser(tabs=1)
+            b = Browser(tabs=1, guard_=self.guard)
             try:
                 await b.lookup(self.base + "/search?fail=1")
             finally:
@@ -123,7 +129,7 @@ class BrowserTest(unittest.TestCase):
         config.LOOKUP_TIMEOUT = 1
 
         async def go():
-            b = Browser(tabs=1)
+            b = Browser(tabs=1, guard_=self.guard)
             try:
                 await b.lookup(self.base + "/search?q=a")
             finally:
@@ -131,9 +137,30 @@ class BrowserTest(unittest.TestCase):
         with self.assertRaisesRegex(ScrapeError, "did not answer"):
             self.run_async(go())
 
+    def lookup_once(self, path):
+        async def go():
+            b = Browser(tabs=1, guard_=self.guard)
+            try:
+                return await b.lookup(self.base + path)
+            finally:
+                await b.stop()
+        return self.run_async(go())
+
+    def test_blocked_status_pauses_lookups(self):
+        with self.assertRaisesRegex(ScrapeError, "429"):
+            self.lookup_once("/search?blocked=1")
+        with self.assertRaises(RateLimited):  # no page is loaded while paused
+            self.lookup_once("/search?q=a")
+
+    def test_bot_check_pauses_lookups(self):
+        config.LOOKUP_TIMEOUT = 1
+        with self.assertRaisesRegex(ScrapeError, "bot check"):
+            self.lookup_once("/search?botcheck=1")
+        self.assertEqual(self.guard.status()["last_block"], "bot check page")
+
     def test_busy_when_every_tab_is_taken(self):
         async def go():
-            b = Browser(tabs=1)
+            b = Browser(tabs=1, guard_=self.guard)
             await b.start()
             try:
                 return await asyncio.gather(b.lookup(self.base + "/search?slow=1"),
@@ -146,7 +173,7 @@ class BrowserTest(unittest.TestCase):
 
     def test_restarts_after_a_crash(self):
         async def go():
-            b = Browser(tabs=1)
+            b = Browser(tabs=1, guard_=self.guard)
             try:
                 await b.start()
                 await b._browser.close()  # as if Chromium crashed

@@ -10,7 +10,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-COPY apple_maps.py browser_client.py config.py main.py ./
+COPY apple_maps.py browser_client.py config.py guard.py main.py ./
 
 # Runs as root, like GET.route, so it can write to the debug folder that
 # Container Manager mounts from the NAS (Chromium runs with --no-sandbox).
