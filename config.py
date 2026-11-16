@@ -1,74 +1,62 @@
 """Configuration for the Apple Maps route API (main.py). Everything can be set
-with an environment variable; the defaults work out of the box.
+with an environment variable.
+
+Apple Maps Server API key (Apple Developer Program; see deploy/nas/README.md):
+
+    APPLE_TEAM_ID        your 10-character Team ID
+    APPLE_MAPS_KEY_ID    the 10-character Key ID of a key with MapKit JS / Maps
+    APPLE_MAPS_KEY_FILE  path to that key's AuthKey_XXXXXXXXXX.p8 file
+                         (default /run/secrets/apple_maps.p8)
+    APPLE_MAPS_PRIVATE_KEY  the .p8 file's text, instead of a file
+    APPLE_MAPS_AUTH_TOKEN   a ready-made Maps auth token (JWT), instead of the
+                         three above; it stops working when it expires
+
+The API:
 
     PORT             port the API listens on (default 8000)
     ROUTE_API_KEY    when set, every endpoint but /health needs it in the
                      X-Route-Key header (set it whenever the API is reachable
                      from outside this machine, e.g. through a Cloudflare Tunnel)
+    SEARCH_LOCATION  "lat,lng" that place names are looked up near (e.g. Kuala
+                     Lumpur, so "Beranang" means the one in Selangor). Empty = none
+    LANGUAGE         language of road names (default en-US)
+    REQUEST_TIMEOUT  seconds to wait for Apple (default 8)
+
+Apple's quota (25,000 calls a day, shared by every Maps Server API call):
+
     CACHE_SECONDS    answer a repeat of the same trip from memory for this long
                      (default 1800 = 30 min; 0 turns the cache off). Points
                      within ~100 m count as the same (CACHE_DECIMALS=3)
-    STALE_SECONDS    while lookups are paused (rate cap or a block), answer
-                     from a cached trip up to this old, marked "stale"
-                     (default 21600 = 6 h; 0 = never)
-    MAX_PER_MINUTE   most DuckDuckGo page loads in any 60 s (default 20);
-                     more are refused at once with a 503 (0 = no cap)
-    PACE_MIN/PACE_MAX random gap in seconds between page loads (default
-                     0.5..1.5; GET.ride waits only 3 s, so keep it short)
-    BLOCK_COOLDOWN   seconds to stop loading pages after DuckDuckGo blocks
-                     this address (default 900)
-    BLOCK_AFTER_TIMEOUTS lookups in a row without an answer that count as a
-                     block (default 3; 0 = never)
-    PROXY_SERVER     send Chromium's traffic through this proxy, e.g.
-                     http://host:port or socks5://host:port (default: none),
-                     with PROXY_USERNAME / PROXY_PASSWORD if it needs them
-    TABS             Chromium tabs open at once, i.e. lookups answered at the
-                     same time (default 2: safe on a 2 GB DS224+)
-    WAIT_FOR_BROWSER seconds a lookup waits for a free tab when all are busy,
-                     before answering 503 (default 10)
-    LOOKUP_TIMEOUT   seconds a tab waits for Apple Maps' directions answer
-                     (default 15)
-    WARM_ON_START    1 starts Chromium as soon as the API starts, so the first
-                     lookup doesn't wait for it (default 1)
-    BLOCK_IMAGES     1 skips images, fonts and media (map tiles): only the
-                     directions answer is read (default 1)
-    HEADLESS         0 shows the Chromium window (to watch it on your computer;
-                     default 1 = hidden)
-    SEARCH_URL       the page that asks Apple Maps for the route; {query} is
-                     replaced by "directions from <from> to <to>"
-    CAPTURE_PATTERN  regular expression for the URL of Apple Maps' directions
-                     answer (the JSON this API reads)
-    CHROMIUM_PATH    a Chromium/Chrome binary to use instead of Playwright's
-    DEBUG_DIR        when a lookup fails, save a screenshot, the page HTML and
-                     the network requests here (default: debug; empty = off)
+    STALE_SECONDS    while calls are paused (a cap or Apple's 429), answer from
+                     a cached trip up to this old, marked "stale" (default
+                     21600 = 6 h; 0 = never)
+    DAILY_LIMIT      most calls to Apple per UTC day (default 24000, a little
+                     under Apple's 25,000 so there is room for tests); 0 = no cap
+    MAX_PER_MINUTE   most calls to Apple in any 60 s (default 0 = no cap)
+    QUOTA_PAUSE      seconds to stop calling Apple after it answers 429, when
+                     it doesn't say how long (default 900)
 """
 import os
 
 PORT = int(os.environ.get("PORT", "8000"))
+
+APPLE_TEAM_ID = (os.environ.get("APPLE_TEAM_ID") or "").strip()
+APPLE_MAPS_KEY_ID = (os.environ.get("APPLE_MAPS_KEY_ID") or "").strip()
+APPLE_MAPS_KEY_FILE = os.environ.get("APPLE_MAPS_KEY_FILE") or "/run/secrets/apple_maps.p8"
+APPLE_MAPS_PRIVATE_KEY = os.environ.get("APPLE_MAPS_PRIVATE_KEY") or ""
+APPLE_MAPS_AUTH_TOKEN = (os.environ.get("APPLE_MAPS_AUTH_TOKEN") or "").strip()
+APPLE_API = (os.environ.get("APPLE_API") or "https://maps-api.apple.com").rstrip("/")
+
+SEARCH_LOCATION = (os.environ.get("SEARCH_LOCATION") or "").replace(" ", "")
+LANGUAGE = os.environ.get("LANGUAGE") or "en-US"
+REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "8"))
+
 CACHE_SECONDS = float(os.environ.get("CACHE_SECONDS", "1800"))
 CACHE_DECIMALS = int(os.environ.get("CACHE_DECIMALS", "3"))
 STALE_SECONDS = float(os.environ.get("STALE_SECONDS", "21600"))
-MAX_PER_MINUTE = int(os.environ.get("MAX_PER_MINUTE", "20"))
-PACE_MIN = float(os.environ.get("PACE_MIN", "0.5"))
-PACE_MAX = max(PACE_MIN, float(os.environ.get("PACE_MAX", "1.5")))
-BLOCK_COOLDOWN = float(os.environ.get("BLOCK_COOLDOWN", "900"))
-BLOCK_AFTER_TIMEOUTS = int(os.environ.get("BLOCK_AFTER_TIMEOUTS", "3"))
-PROXY_SERVER = os.environ.get("PROXY_SERVER") or None
-PROXY_USERNAME = os.environ.get("PROXY_USERNAME") or None
-PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD") or None
-TABS = max(1, int(os.environ.get("TABS", "2")))
-WAIT_FOR_BROWSER = float(os.environ.get("WAIT_FOR_BROWSER", "10"))
-LOOKUP_TIMEOUT = float(os.environ.get("LOOKUP_TIMEOUT", "15"))
-WARM_ON_START = os.environ.get("WARM_ON_START", "1") == "1"
-BLOCK_IMAGES = os.environ.get("BLOCK_IMAGES", "1") == "1"
-HEADLESS = os.environ.get("HEADLESS", "1") != "0"
-SEARCH_URL = os.environ.get("SEARCH_URL") or "https://duckduckgo.com/?q={query}&ia=maps&iaxm=directions"
-CAPTURE_PATTERN = os.environ.get("CAPTURE_PATTERN") or r"apple-mapkit\.com/.*directions"
-CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH") or None
-DEBUG_DIR = os.environ.get("DEBUG_DIR", "debug")
-USER_AGENT = os.environ.get("USER_AGENT") or (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
+DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "24000"))
+MAX_PER_MINUTE = int(os.environ.get("MAX_PER_MINUTE", "0"))
+QUOTA_PAUSE = float(os.environ.get("QUOTA_PAUSE", "900"))
 
 
 def route_api_key():

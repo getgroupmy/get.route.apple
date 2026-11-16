@@ -15,10 +15,9 @@ env/
 .DS_Store
 Thumbs.db
 
-# Local secrets
+# Local secrets: never commit .env or an Apple key
 .env
-
-# Saved pages from failed lookups (DEBUG_DIR)
-**/debug/*
-# ...but keep the NAS mount folder, which Synology's Docker won't create itself
-!deploy/nas/debug/.gitkeep
+*.p8
+deploy/nas/secrets/*
+# ...but keep the NAS key folder, which Synology's Docker won't create itself
+!deploy/nas/secrets/.gitkeep

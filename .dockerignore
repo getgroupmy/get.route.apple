@@ -1,4 +1,5 @@
 .git
+.github
 .venv
 venv
 env
@@ -6,7 +7,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 test_*.py
+fake_apple.py
 deploy/
-debug/
+*.p8
 .env
 **/.DS_Store

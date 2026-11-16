@@ -1,33 +1,57 @@
-"""Turning a trip into the page to open, and Apple Maps' directions answer
-into GET.route's route fields. No browser here, so it is easy to test.
+"""Apple Maps Server API directions, turned into GET.route's route fields.
 
-Apple's answer (MapKit's /directions) looks like:
+    GET https://maps-api.apple.com/v1/directions
+        ?origin=...&destination=...&transportType=Automobile
+        &requestsAlternateRoutes=true[&departureDate=...|&arrivalDate=...]
 
-    {"origin": {"coordinate": {"latitude": 3.15, "longitude": 101.71}, ...},
+Apple's answer:
+
+    {"origin": {"coordinate": {"latitude": 3.15, "longitude": 101.71}, "name": ...},
      "destination": {...},
-     "routes": [{"name": "Jalan Tun Razak", "distanceMeters": 5400,
-                 "expectedTravelTimeSeconds": 840, "hasTolls": false, ...}]}
+     "routes": [{"name": "E7", "distanceMeters": 48213, "durationSeconds": 2940,
+                 "hasTolls": true, "stepIndexes": [0, 1, 2], ...}],
+     "steps": [...],
+     "stepPaths": [[{"latitude": ..., "longitude": ...}, ...], ...]}
 
-The parser also accepts the other spellings MapKit has used (`distance`,
-`expectedTravelTime`, `duration`) and a `routes` list nested one level down,
-so a small change on Apple's side doesn't break every lookup.
+The parser also takes the other spellings MapKit has used (`distance`,
+`expectedTravelTimeSeconds`, `duration`), so a small change on Apple's side
+doesn't break every lookup.
 """
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 import config
 
 
 class NoRouteError(ValueError):
-    """Apple Maps says there is no driving route between the two places."""
+    """Apple Maps found no driving route (or couldn't find a place)."""
 
 
 DISTANCE_KEYS = ("distanceMeters", "distance")
-TIME_KEYS = ("expectedTravelTimeSeconds", "expectedTravelTime", "durationSeconds", "duration")
+TIME_KEYS = ("durationSeconds", "expectedTravelTimeSeconds", "expectedTravelTime", "duration")
 
 
-def search_url(from_text, to_text):
-    query = f"directions from {from_text} to {to_text}"
-    return config.SEARCH_URL.replace("{query}", quote_plus(query))
+def directions_params(trip):
+    """Query parameters for /v1/directions."""
+    params = {
+        "origin": trip["from_text"],
+        "destination": trip["to_text"],
+        "transportType": "Automobile",
+        "requestsAlternateRoutes": "true",
+        "lang": config.LANGUAGE,
+    }
+    if config.SEARCH_LOCATION:
+        params["searchLocation"] = config.SEARCH_LOCATION
+    if trip.get("depart_at"):
+        params["departureDate"] = trip["depart_at"]
+    if trip.get("arrive_at"):
+        params["arrivalDate"] = trip["arrive_at"]
+    return params
+
+
+def apple_maps_link(from_text, to_text):
+    """A link that opens the same trip in Apple Maps."""
+    return (f"https://maps.apple.com/?saddr={quote(from_text, safe=',')}"
+            f"&daddr={quote(to_text, safe=',')}&dirflg=d")
 
 
 def _number(route, keys):
@@ -47,31 +71,8 @@ def _is_route(item):
         and _number(item, TIME_KEYS) is not None
 
 
-def find_routes(payload, depth=0):
-    """The list of route dicts in an Apple Maps answer ([] if there are none)."""
-    if depth > 4:
-        return []
-    if isinstance(payload, dict):
-        routes = payload.get("routes")
-        if isinstance(routes, list) and any(_is_route(r) for r in routes):
-            return [r for r in routes if _is_route(r)]
-        for v in payload.values():
-            if isinstance(v, (dict, list)):
-                found = find_routes(v, depth + 1)
-                if found:
-                    return found
-    elif isinstance(payload, list):
-        if any(_is_route(r) for r in payload):
-            return [r for r in payload if _is_route(r)]
-        for v in payload:
-            found = find_routes(v, depth + 1)
-            if found:
-                return found
-    return []
-
-
 def _place(payload, key):
-    """{"lat", "lng"} of the answer's origin / destination, if it has one."""
+    """{"lat", "lng", "name"} of the answer's origin / destination, if any."""
     p = payload.get(key) if isinstance(payload, dict) else None
     if not isinstance(p, dict):
         return None
@@ -82,17 +83,35 @@ def _place(payload, key):
     return None
 
 
+def _polyline(payload, route):
+    """The route's line as [{"lat", "lng"}, ...] (GET.route's shape), or None."""
+    paths = payload.get("stepPaths")
+    indexes = route.get("stepIndexes")
+    if not isinstance(paths, list) or not isinstance(indexes, list):
+        return None
+    line = []
+    for i in indexes:
+        if not isinstance(i, int) or not 0 <= i < len(paths) or not isinstance(paths[i], list):
+            continue
+        for p in paths[i]:
+            if isinstance(p, dict) and isinstance(p.get("latitude"), (int, float)):
+                point = {"lat": p["latitude"], "lng": p["longitude"]}
+                if not line or line[-1] != point:  # steps share their end points
+                    line.append(point)
+    return line or None
+
+
 def parse_directions(payload, link):
-    """GET.route's route list from an Apple Maps answer. Raises NoRouteError."""
-    raw = find_routes(payload)
+    """GET.route's route list from Apple's answer. Raises NoRouteError."""
+    raw = payload.get("routes") if isinstance(payload, dict) else None
+    raw = [r for r in raw if _is_route(r)] if isinstance(raw, list) else []
     if not raw:
         raise NoRouteError("Apple Maps found no driving route between these places")
     routes = []
     for r in raw:
-        seconds = int(round(_number(r, TIME_KEYS)))
         routes.append({
             "name": r.get("name") or None,
-            "duration_seconds": seconds,
+            "duration_seconds": int(round(_number(r, TIME_KEYS))),
             "distance_meters": int(round(_number(r, DISTANCE_KEYS))),
             "is_fastest": False,
             "is_toll": bool(r.get("hasTolls", False)),
@@ -106,7 +125,7 @@ def parse_directions(payload, link):
             "attributes": [],
             "jams": [],
             "alerts": [],
-            "polyline": None,
+            "polyline": _polyline(payload, r),
             "link": link,
         })
     min(routes, key=lambda x: x["duration_seconds"])["is_fastest"] = True
