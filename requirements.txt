@@ -1,5 +1,5 @@
-# The Playwright version must match the base image in Dockerfile
-# (mcr.microsoft.com/playwright/python:v1.63.0-noble).
-playwright==1.63.0
 fastapi==0.163.1
 uvicorn==0.54.0
+httpx==0.28.1
+pyjwt[crypto]==2.15.1
+cryptography==50.0.2

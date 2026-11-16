@@ -1,11 +1,12 @@
 # The Apple Maps route API on the office NAS (see README.md), set up the same
-# way as GET.route and the Traffic Scraper: one container with Chromium,
-# reached through GET.route's Cloudflare Tunnel.
+# way as GET.route and the Traffic Scraper: one small container, reached
+# through GET.route's Cloudflare Tunnel, and on the NAS's LAN address.
 #
 #   apple.getride.my -> http://get-route-apple:8000   needs X-Route-Key
 #
-# Chromium opens when the container starts and stays open (WARM_ON_START):
-# GET.ride allows the route step only 3 s, and a cold Chromium needs longer.
+# Answers come from Apple's official Maps Server API, signed with your Apple
+# Developer team's Maps key: put the key's .p8 file in ./secrets/ as
+# apple_maps.p8 and its Team ID and Key ID in .env.
 #
 # By default it joins GET.route's Docker network (GET_ROUTE_NETWORK in .env),
 # so GET.route's cloudflared can reach it by name. Without GET.route, start
@@ -19,38 +20,26 @@ name: get-route-apple
 services:
   get-route-apple:
     build: ../..
-    platform: linux/amd64
-    image: get-route-apple:1
+    image: get-route-apple:2
     container_name: get-route-apple
     restart: unless-stopped
-    # Chromium needs a large /dev/shm (tmpfs: it only takes memory when used).
-    shm_size: 512m
     environment:
       PORT: "8000"
       ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
-      # Repeat trips from memory (30 min), and older answers while paused.
+      # Apple Developer: Team ID, and the Key ID of the Maps key in ./secrets.
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:?Set APPLE_TEAM_ID in .env (Apple Developer > Membership details)}
+      APPLE_MAPS_KEY_ID: ${APPLE_MAPS_KEY_ID:?Set APPLE_MAPS_KEY_ID in .env (Apple Developer > Keys)}
+      APPLE_MAPS_KEY_FILE: /run/secrets/apple_maps.p8
+      # Place names are looked up near here (empty = anywhere).
+      SEARCH_LOCATION: ${SEARCH_LOCATION:-}
+      LANGUAGE: ${LANGUAGE:-en-US}
+      # Apple allows 25,000 calls a day; repeats come from memory (30 min),
+      # and older answers are used while the quota is used up.
       CACHE_SECONDS: ${CACHE_SECONDS:-1800}
       STALE_SECONDS: ${STALE_SECONDS:-21600}
-      # Keep the NAS's address under DuckDuckGo's bot limits (see README.md,
-      # "Staying under DuckDuckGo's limits").
-      MAX_PER_MINUTE: ${MAX_PER_MINUTE:-20}
-      PACE_MIN: ${PACE_MIN:-0.5}
-      PACE_MAX: ${PACE_MAX:-1.5}
-      BLOCK_COOLDOWN: ${BLOCK_COOLDOWN:-900}
-      BLOCK_AFTER_TIMEOUTS: ${BLOCK_AFTER_TIMEOUTS:-3}
-      # Optional: send Chromium through a proxy or VPN (empty = the NAS's own address).
-      PROXY_SERVER: ${PROXY_SERVER:-}
-      PROXY_USERNAME: ${PROXY_USERNAME:-}
-      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
-      # Tabs open at once = lookups answered at the same time. Each uses
-      # roughly 150-250 MB on top of Chromium's own ~300 MB; see README.md.
-      TABS: ${TABS:-2}
-      WAIT_FOR_BROWSER: ${WAIT_FOR_BROWSER:-10}
-      LOOKUP_TIMEOUT: ${LOOKUP_TIMEOUT:-15}
-      WARM_ON_START: ${WARM_ON_START:-1}
-      # Empty = the defaults in config.py; change only if lookups stop working.
-      SEARCH_URL: ${SEARCH_URL:-}
-      CAPTURE_PATTERN: ${CAPTURE_PATTERN:-}
+      DAILY_LIMIT: ${DAILY_LIMIT:-24000}
+      MAX_PER_MINUTE: ${MAX_PER_MINUTE:-0}
+      QUOTA_PAUSE: ${QUOTA_PAUSE:-900}
     expose:
       - "8000"
     # Also on the NAS's own address (http://NAS_IP:8085) for apps on the
@@ -59,13 +48,12 @@ services:
     ports:
       - "${LAN_PORT:-8085}:8000"
     volumes:
-      # Pages Chromium saw when a lookup failed (see README.md).
-      - ./debug:/app/debug
+      # The Apple Maps key (AuthKey_XXXXXXXXXX.p8, renamed apple_maps.p8). Read-only.
+      - ./secrets:/run/secrets:ro
     networks:
       - default
       - get-route
-    # Keeps DSM (and GET.route) safe: past this, Chromium is stopped, not the NAS.
-    mem_limit: ${MEM_LIMIT:-1200m}
+    mem_limit: ${MEM_LIMIT:-256m}
 
   # Only with --profile own-tunnel (when GET.route's tunnel isn't used).
   cloudflared:
@@ -81,8 +69,8 @@ services:
     mem_limit: 256m
 
 networks:
-  # GET.route's network, where its cloudflared runs. Find its name with:
+  # GET.route's network, where its cloudflared runs. Its NAME (not its ID):
   #   sudo docker inspect get-route-tunnel --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
   get-route:
     external: true
-    name: ${GET_ROUTE_NETWORK:?Set GET_ROUTE_NETWORK in .env (GET.route's Docker network)}
+    name: ${GET_ROUTE_NETWORK:?Set GET_ROUTE_NETWORK in .env (GET.route's Docker network name)}

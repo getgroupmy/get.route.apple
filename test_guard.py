@@ -1,74 +1,65 @@
-"""Tests for guard.py with a fake clock.   python -m unittest test_guard.py"""
-import asyncio
+"""Tests for guard.py (Apple's quota) with a fake clock.   python -m unittest test_guard.py"""
+import datetime
 import unittest
 
 from guard import Guard, RateLimited
 
+NOON = datetime.datetime(2026, 11, 16, 12, 0, tzinfo=datetime.timezone.utc).timestamp()
+
 
 class Clock:
-    def __init__(self):
-        self.t = 1000.0
-        self.slept = []
+    def __init__(self, t=NOON):
+        self.t = t
 
     def __call__(self):
         return self.t
 
-    async def sleep(self, s):
-        self.slept.append(round(s, 3))
-        self.t += s
-
-
-def make(**kw):
-    c = Clock()
-    defaults = dict(per_minute=3, pace=(1, 1), cooldown=900, after_timeouts=2)
-    defaults.update(kw)
-    return Guard(clock=c, sleep=c.sleep, rand=lambda a, b: a, **defaults), c
-
 
 class GuardTest(unittest.TestCase):
-    def test_per_minute_cap(self):
-        g, c = make()
+    def test_daily_limit_resets_at_midnight_utc(self):
+        c = Clock()
+        g = Guard(daily=3, per_minute=0, pause=900, clock=c)
         for _ in range(3):
-            asyncio.run(g.take())
+            g.take()
+        with self.assertRaisesRegex(RateLimited, "DAILY_LIMIT") as e:
+            g.take()
+        self.assertEqual(e.exception.retry_after, 12 * 3600)
+        c.t += 12 * 3600  # 00:00 UTC the next day
+        g.take()
+        self.assertEqual(g.status()["calls_today"], 1)
+
+    def test_per_minute(self):
+        c = Clock()
+        g = Guard(daily=0, per_minute=2, pause=900, clock=c)
+        g.take()
+        c.t += 10
+        g.take()
         with self.assertRaises(RateLimited) as e:
-            g.check()
-        self.assertEqual(e.exception.retry_after, 58)  # the first load leaves the window at +60 s
-        c.t += 58
-        g.check()
-        self.assertEqual(g.status()["loads_last_minute"], 2)
+            g.take()
+        self.assertEqual(e.exception.retry_after, 50)
+        c.t += 50
+        g.take()
 
-    def test_spacing(self):
-        g, c = make(per_minute=0, pace=(2, 2))
-        for _ in range(3):
-            asyncio.run(g.take())
-        self.assertEqual(c.slept, [2, 2])  # the first goes at once, then 2 s apart
-
-    def test_block_pauses_everything(self):
-        g, c = make()
-        g.blocked("page answered 429")
+    def test_pause_after_apple_429(self):
+        c = Clock()
+        g = Guard(daily=0, per_minute=0, pause=900, clock=c)
+        g.apple_said_429()
         with self.assertRaisesRegex(RateLimited, "429") as e:
-            g.check()
+            g.take()
         self.assertEqual(e.exception.retry_after, 900)
-        c.t += 901
-        g.check()
-        self.assertEqual(g.status()["blocks_since_start"], 1)
-
-    def test_timeouts_in_a_row_count_as_a_block(self):
-        g, _ = make()
-        g.no_answer()
-        g.answered()
-        g.no_answer()
-        g.check()  # not in a row
-        g.no_answer()
-        with self.assertRaises(RateLimited):
-            g.check()
+        g.apple_said_429(120)  # Apple's Retry-After wins
+        with self.assertRaises(RateLimited) as e:
+            g.take()
+        self.assertEqual(e.exception.retry_after, 120)
+        c.t += 121
+        g.take()
+        self.assertEqual(g.status()["refused_since_start"], 2)
 
     def test_off(self):
-        g, _ = make(per_minute=0, pace=(0, 0), after_timeouts=0)
-        for _ in range(100):
-            asyncio.run(g.take())
-            g.no_answer()
-        g.check()
+        g = Guard(daily=0, per_minute=0, pause=900, clock=Clock())
+        for _ in range(1000):
+            g.take()
+        self.assertIsNone(g.status()["daily_limit"])
 
 
 if __name__ == "__main__":
