@@ -104,6 +104,11 @@ python -m unittest test_guard.py test_apple_maps.py test_api.py test_browser.py
 `test_browser.py` drives a real Chromium against a local fake page (it is
 skipped if Playwright's Chromium isn't installed); the others need no browser.
 
+GitHub Actions (`.github/workflows/ci.yml`) runs these tests on every push
+and pull request, then builds the Docker image, starts it and checks that
+Chromium opens and that the key is required. CI never contacts DuckDuckGo
+or Apple.
+
 ## Files
 
 | File | What it does |

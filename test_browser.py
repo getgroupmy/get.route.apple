@@ -1,6 +1,7 @@
 """Tests for browser_client.py with a real Chromium and a local fake search
 page that asks a fake "Apple Maps" for directions, as DuckDuckGo's page does.
-Skipped when Playwright's Chromium isn't installed.
+Skipped when Playwright's Chromium isn't installed (fails instead with
+REQUIRE_CHROMIUM=1, as in CI).
 
     python -m unittest test_browser.py
 """
@@ -63,6 +64,11 @@ def chromium_available():
         return True
     except Exception:
         return False
+
+
+# In CI (REQUIRE_CHROMIUM=1) a missing Chromium is a failure, not a skip.
+if os.environ.get("REQUIRE_CHROMIUM") == "1" and not chromium_available():
+    raise RuntimeError("REQUIRE_CHROMIUM=1 but Playwright's Chromium could not start")
 
 
 @unittest.skipUnless(chromium_available(), "Playwright's Chromium is not installed")
