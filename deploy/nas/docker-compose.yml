@@ -1,0 +1,88 @@
+# The Apple Maps route API on the office NAS (see README.md), set up the same
+# way as GET.route and the Traffic Scraper: one container with Chromium,
+# reached through GET.route's Cloudflare Tunnel.
+#
+#   apple.getride.my -> http://get-route-apple:8000   needs X-Route-Key
+#
+# Chromium opens when the container starts and stays open (WARM_ON_START):
+# GET.ride allows the route step only 3 s, and a cold Chromium needs longer.
+#
+# By default it joins GET.route's Docker network (GET_ROUTE_NETWORK in .env),
+# so GET.route's cloudflared can reach it by name. Without GET.route, start
+# it with its own tunnel instead (see README.md, "Its own tunnel").
+
+# A fixed project name. GET.route's and the Traffic Scraper's compose files
+# also live in folders called deploy/nas; without this, all would be the
+# project "nas" and commands here could stop their containers.
+name: get-route-apple
+
+services:
+  get-route-apple:
+    build: ../..
+    platform: linux/amd64
+    image: get-route-apple:1
+    container_name: get-route-apple
+    restart: unless-stopped
+    # Chromium needs a large /dev/shm (tmpfs: it only takes memory when used).
+    shm_size: 512m
+    environment:
+      PORT: "8000"
+      ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
+      # Repeat trips from memory (30 min), and older answers while paused.
+      CACHE_SECONDS: ${CACHE_SECONDS:-1800}
+      STALE_SECONDS: ${STALE_SECONDS:-21600}
+      # Keep the NAS's address under DuckDuckGo's bot limits (see README.md,
+      # "Staying under DuckDuckGo's limits").
+      MAX_PER_MINUTE: ${MAX_PER_MINUTE:-20}
+      PACE_MIN: ${PACE_MIN:-0.5}
+      PACE_MAX: ${PACE_MAX:-1.5}
+      BLOCK_COOLDOWN: ${BLOCK_COOLDOWN:-900}
+      BLOCK_AFTER_TIMEOUTS: ${BLOCK_AFTER_TIMEOUTS:-3}
+      # Optional: send Chromium through a proxy or VPN (empty = the NAS's own address).
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      # Tabs open at once = lookups answered at the same time. Each uses
+      # roughly 150-250 MB on top of Chromium's own ~300 MB; see README.md.
+      TABS: ${TABS:-2}
+      WAIT_FOR_BROWSER: ${WAIT_FOR_BROWSER:-10}
+      LOOKUP_TIMEOUT: ${LOOKUP_TIMEOUT:-15}
+      WARM_ON_START: ${WARM_ON_START:-1}
+      # Empty = the defaults in config.py; change only if lookups stop working.
+      SEARCH_URL: ${SEARCH_URL:-}
+      CAPTURE_PATTERN: ${CAPTURE_PATTERN:-}
+    expose:
+      - "8000"
+    # Also on the NAS's own address (http://NAS_IP:8085) for apps on the
+    # office LAN. This opens no port on the router. Set LAN_PORT in .env;
+    # remove these two lines if only the tunnel should reach it.
+    ports:
+      - "${LAN_PORT:-8085}:8000"
+    volumes:
+      # Pages Chromium saw when a lookup failed (see README.md).
+      - ./debug:/app/debug
+    networks:
+      - default
+      - get-route
+    # Keeps DSM (and GET.route) safe: past this, Chromium is stopped, not the NAS.
+    mem_limit: ${MEM_LIMIT:-1200m}
+
+  # Only with --profile own-tunnel (when GET.route's tunnel isn't used).
+  cloudflared:
+    profiles: ["own-tunnel"]
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: get-route-apple-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}  # set in .env when using --profile own-tunnel
+    depends_on:
+      - get-route-apple
+    mem_limit: 256m
+
+networks:
+  # GET.route's network, where its cloudflared runs. Find its name with:
+  #   sudo docker inspect get-route-tunnel --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+  get-route:
+    external: true
+    name: ${GET_ROUTE_NETWORK:?Set GET_ROUTE_NETWORK in .env (GET.route's Docker network)}
