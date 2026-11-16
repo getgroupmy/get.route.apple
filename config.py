@@ -32,7 +32,8 @@ Apple's quota (25,000 calls a day, shared by every Maps Server API call):
                      21600 = 6 h; 0 = never)
     DAILY_LIMIT      most calls to Apple per UTC day (default 24000, a little
                      under Apple's 25,000 so there is room for tests); 0 = no cap
-    MAX_PER_MINUTE   most calls to Apple in any 60 s (default 0 = no cap)
+    MAX_PER_MINUTE   most calls to Apple in any 60 s (default 20; 0 = no cap),
+                     so one busy hour can't use up the whole day's quota
     QUOTA_PAUSE      seconds to stop calling Apple after it answers 429, when
                      it doesn't say how long (default 900)
 """
@@ -55,7 +56,7 @@ CACHE_SECONDS = float(os.environ.get("CACHE_SECONDS", "1800"))
 CACHE_DECIMALS = int(os.environ.get("CACHE_DECIMALS", "3"))
 STALE_SECONDS = float(os.environ.get("STALE_SECONDS", "21600"))
 DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "24000"))
-MAX_PER_MINUTE = int(os.environ.get("MAX_PER_MINUTE", "0"))
+MAX_PER_MINUTE = int(os.environ.get("MAX_PER_MINUTE", "20"))
 QUOTA_PAUSE = float(os.environ.get("QUOTA_PAUSE", "900"))
 
 
