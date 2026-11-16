@@ -5,7 +5,7 @@ when they run out. For every call to Apple (cache hits cost none):
 
   * at most DAILY_LIMIT calls per UTC day, so the team never hits Apple's
     limit unexpectedly;
-  * optionally at most MAX_PER_MINUTE in any 60 s, to spread the day's quota;
+  * at most MAX_PER_MINUTE (20) in any 60 s, so a busy hour can't use the whole day's quota;
   * after a 429 from Apple, no calls for Retry-After (or QUOTA_PAUSE) seconds.
 
 A call that isn't allowed fails at once (RateLimited: the API answers 503

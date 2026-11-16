@@ -183,7 +183,7 @@ fetch every 25 minutes is separate. The container keeps inside it:
 |---|---|---|
 | `CACHE_SECONDS` | 1800 | Repeat trips are answered from memory for 30 minutes and cost no call. Points within about 100 m count as the same trip. |
 | `DAILY_LIMIT` | 24000 | Most calls per UTC day (resets 08:00 Malaysia time). Past it: 503 with `Retry-After`, so GET.ride moves on at once. |
-| `MAX_PER_MINUTE` | 0 (off) | Spread the day's calls, e.g. `17` ≈ 24,000 over 24 hours. |
+| `MAX_PER_MINUTE` | 20 | Most calls in any minute; extra lookups get a 503 at once, so one busy hour can't use up the day's quota. 20 a minute is ~28,800 a day, so `DAILY_LIMIT` still caps the total. `0` = no cap. |
 | `QUOTA_PAUSE` | 900 | After Apple answers 429 without saying how long, no calls for 15 minutes. |
 | `STALE_SECONDS` | 21600 | While paused, a trip asked in the last 6 hours is answered from memory with `"stale": true`. |
 
