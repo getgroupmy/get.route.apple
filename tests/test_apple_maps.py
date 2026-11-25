@@ -2,8 +2,8 @@
 import unittest
 from unittest import mock
 
-import apple_maps
-from apple_maps import NoRouteError, apple_maps_link, directions_params, parse_directions
+from app import apple_maps
+from app.apple_maps import NoRouteError, apple_maps_link, directions_params, parse_directions
 
 ANSWER = {
     "origin": {"coordinate": {"latitude": 3.1579, "longitude": 101.7116}, "name": "KLCC"},

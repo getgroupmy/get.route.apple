@@ -1,153 +1,49 @@
-# GET.route Apple Maps on the office NAS
+# GET.route Apple Maps on the office NAS (applemap2.getcdn.link)
 
-This container answers your app with **Apple Maps' drive time and
-distance**, from Apple's official Maps Server API. It runs on the NAS the
-same way GET.route and the Traffic Scraper do: one container with a small
-API, reached through **GET.route's Cloudflare Tunnel**, and on the NAS's own
-LAN address.
+The NAS runs the **second** Apple Maps server; the Mac mini runs the first
+(`applemap.getcdn.link`, [`../mac/README.md`](../mac/README.md)). Both are the
+same service with its own console, as `waze` and `waze2` are for GET.route:
 
 ```
-                      route.getride.my  ─┐                 ┌─► get-route-pool    (GET.route, Waze)
- your app ──https──►  traffic.getride.my ├─ Tunnel ─► get-route-tunnel ─► traffic-scraper  (Google Maps)
-           X-Route-Key  apple.getride.my ─┘  (cloudflared) └─► get-route-apple ──https──► Apple Maps Server API
-
- office LAN ──http──► NAS_IP:8085 ─────────────────────────────► get-route-apple
+                 ┌─► applemap.getcdn.link   ─ Mac's tunnel ─► Apple Maps on the Mac mini  (first)
+ GET.ride ───────┤
+ other apps      └─► applemap2.getcdn.link  ─ GET.route's tunnel (NAS) ─► Apple Maps on the NAS  (second)
+ (an app's key in X-Route-Key)                               each ──https──► Apple Maps Server API
 ```
 
-There's no browser in this container: each lookup is one HTTPS call to
-Apple, signed with your Apple Developer team's Maps key. It needs about
-60 MB of memory and answers in well under a second.
+Apps list both addresses, the Mac first, and move to the NAS when the Mac
+doesn't answer. The two share nothing: each has its own apps and keys,
+console users, settings, request log and audit trail. Both sign with the
+same Apple key, so Apple's 25,000 calls a day are split between them in
+their **Settings** (Mac 20,000, NAS 4,500).
 
-**The NAS is the backup.** The office Mac mini runs the same service as the
-primary at `apple-mac.getride.my` (see [`../mac/README.md`](../mac/README.md)).
-GET.ride's Fare AI lists the Mac above the NAS, so the NAS answers only
-while the Mac is down. Set `DAILY_LIMIT=4500` in this `.env`: Apple's
-25,000 calls a day are shared by both machines, and the Mac has 20,000.
+## What the NAS needs
+
+- Synology DSM 7.2+ with **Container Manager** (any CPU: plain Python).
+- About 200 MB of disk and 60 MB of memory.
+- Outgoing HTTPS to `maps-api.apple.com`.
+- GET.route's Cloudflare Tunnel (or its own; see the end).
 
 ## Get an Apple Maps key
 
-You need a paid **Apple Developer Program** membership (US$99 a year,
-https://developer.apple.com/programs/). Then, at
+Once, in the Apple Developer Program (US$99 a year), at
 https://developer.apple.com/account:
 
-1. **Make a Maps ID.** Certificates, Identifiers & Profiles › **Identifiers**
-   › **+** › **Maps IDs** › Continue. Description `GET.route Apple Maps`,
-   identifier e.g. `maps.my.getride.route` › Continue › Register.
-2. **Make a key.** Certificates, Identifiers & Profiles › **Keys** › **+**.
-   Name it `GET.route Apple Maps`, tick **MapKit JS** (Apple's Maps services
-   key), click **Configure** next to it and choose the Maps ID from step 1 ›
-   Save › Continue › Register.
-3. **Download the key.** Click **Download**. You get
-   `AuthKey_XXXXXXXXXX.p8`. **Apple lets you download it only once**: keep a
-   copy in your password manager. The 10 characters in the name are the
-   **Key ID** (also shown on the page).
-4. **Find your Team ID.** Account › **Membership details** › Team ID
-   (10 characters).
+1. **Identifiers › + › Maps IDs**: e.g. `maps.my.getride.route`.
+2. **Keys › +**: tick **MapKit JS**, **Configure** › that Maps ID › Register.
+3. **Download** `AuthKey_XXXXXXXXXX.p8` (only once: keep it in your password
+   manager). `XXXXXXXXXX` is the **Key ID**.
+4. **Membership details › Team ID** (a different 10-character code).
 
-## Set it up (next to GET.route)
+The office already has one: use the same Team ID, Key ID and `.p8` file on both machines.
 
-This uses **GET.route's Cloudflare tunnel**: no second tunnel, no new
-token. The container joins GET.route's Docker network, so GET.route's
-`cloudflared` can reach it by name.
+## Update the NAS to this version (it's already running)
 
-1. **Copy this repository to the NAS** over SSH:
-
-   ```bash
-   cd /volume1/docker && sudo git clone https://github.com/getgroupmy/get.route.apple.git get-route-apple
-   ```
-
-   (Or download it as a ZIP, upload it with File Station into `docker` and
-   unpack it as `get-route-apple`.)
-
-2. **Put the key on the NAS** as `deploy/nas/secrets/apple_maps.p8`. With
-   File Station: upload `AuthKey_XXXXXXXXXX.p8` into
-   `docker/get-route-apple/deploy/nas/secrets/`, then rename it to
-   `apple_maps.p8`. Or from your Mac:
-
-   ```bash
-   scp -O ~/Downloads/AuthKey_XXXXXXXXXX.p8 kabeer@NAS_IP:/volume1/docker/get-route-apple/deploy/nas/secrets/apple_maps.p8
-   ```
-
-3. **Find GET.route's network name** (the name, not the long ID):
-
-   ```bash
-   sudo docker inspect get-route-tunnel --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
-   ```
-
-   It prints e.g. `get-route_default`.
-
-4. **Make `.env`.** In `deploy/nas`, copy `.env.example` to `.env` and set:
-   - `ROUTE_API_KEY`: a new secret (`openssl rand -hex 32`), or GET.route's
-     key so your app sends one key to all three;
-   - `APPLE_TEAM_ID` and `APPLE_MAPS_KEY_ID`: from "Get an Apple Maps key";
-   - `GET_ROUTE_NETWORK`: the name from step 3.
-
-   ```bash
-   cd /volume1/docker/get-route-apple/deploy/nas && sudo cp .env.example .env && sudo vi .env
-   ```
-
-5. **Start it:**
-
-   ```bash
-   cd /volume1/docker/get-route-apple/deploy/nas && sudo docker compose up -d --build
-   ```
-
-   (Or Container Manager › Project › Create, project name
-   `get-route-apple`, path `docker/get-route-apple/deploy/nas`, **Use
-   existing docker-compose.yml**.) The build takes a minute or two.
-
-6. **Check the key works:**
-
-   ```bash
-   curl -s -X POST -H "X-Route-Key: $(sudo grep '^ROUTE_API_KEY=' .env | cut -d= -f2)" http://localhost:8085/warm
-   ```
-
-   `{"token_valid_seconds": 1800}` means Apple accepted the key. An error
-   names what is wrong (a missing setting, an unreadable key file, or
-   Apple's refusal).
-
-7. **First lookup:**
-
-   ```bash
-   curl -s -H "X-Route-Key: $(sudo grep '^ROUTE_API_KEY=' .env | cut -d= -f2)" "http://localhost:8085/directions?origin=KLCC,Kuala%20Lumpur&destination=Beranang,Selangor"
-   ```
-
-8. **Reach it from the internet.** In Cloudflare Zero Trust › Networks ›
-   Tunnels, open **GET.route's tunnel** › Public Hostname › **Add a public
-   hostname**: `apple.getride.my` → type **HTTP**, URL `get-route-apple:8000`.
-
-   GET.ride's subdomain worker answers every `*.getride.my` name with the
-   web app unless the name is in its pass-through list: add `apple` to
-   `PASS_THROUGH` in its `wrangler.toml` (and to the repository variable
-   `SUBDOMAIN_PROXY_PASS_THROUGH` if it is set, e.g. `stats,route,apple`).
-   Then `https://apple.getride.my/health` answers `{"status": "ok", ...}`.
-
-9. In your app, send `GET /routes/search?from=…&to=…` to that hostname with
-   the key in `X-Route-Key`. On the office LAN, `http://NAS_IP:8085` works too.
-
-**Separate from GET.route.** The project is always called
-`get-route-apple` (set in `docker-compose.yml`), so `docker compose`
-commands in this folder never touch GET.route's or the Traffic Scraper's
-containers. If GET.route's network is ever recreated, run step 5 again to
-rejoin it.
-
-### Only on the office LAN (no tunnel)
-
-Skip steps 3 and 8: run `sudo docker network create get-route-apple-net`
-and set `GET_ROUTE_NETWORK=get-route-apple-net` in `.env`.
-
-### Its own tunnel (without GET.route)
-
-1. `sudo docker network create get-route-apple-net` and set
-   `GET_ROUTE_NETWORK=get-route-apple-net` in `.env`.
-2. Create a tunnel in Cloudflare (Docker), put its token in `TUNNEL_TOKEN`
-   in `.env`, and add the hostname → `http://get-route-apple:8000`.
-3. Start with `sudo docker compose --profile own-tunnel up -d --build`.
-
-## Updating from the DuckDuckGo version
-
-The first version opened DuckDuckGo in a browser and was blocked (418).
-This version calls Apple directly. On the NAS:
+The NAS runs the earlier version (one shared `ROUTE_API_KEY`, at
+`apple.getride.my`). This version adds the console and per-app keys.
+**Nothing stops working**: the old `ROUTE_API_KEY` becomes an app called
+"GET.ride (ROUTE_API_KEY)" on the first start, so GET.ride keeps answering
+while you move it to its own keys.
 
 1. Get the new code:
 
@@ -155,76 +51,124 @@ This version calls Apple directly. On the NAS:
    cd /volume1/docker/get-route-apple && sudo git pull
    ```
 
-2. Put the key in `deploy/nas/secrets/apple_maps.p8` (setup step 2).
-3. Add to your existing `deploy/nas/.env` (keep `ROUTE_API_KEY` and
-   `GET_ROUTE_NETWORK`):
-
-   ```
-   APPLE_TEAM_ID=ABCDE12345
-   APPLE_MAPS_KEY_ID=XYZ9876543
-   SEARCH_LOCATION=3.1390,101.6869
-   MEM_LIMIT=256m
-   ```
-
-   The old settings (`TABS`, `PACE_MIN`, `BLOCK_COOLDOWN`, …) are no longer
-   read; you can delete them.
-4. Rebuild: `cd deploy/nas && sudo docker compose up -d --build`, then
-   steps 6 and 7 above.
-5. Free about 2 GB: remove the old browser image and the old debug pages:
+2. Add the console's admin token and the new address to `.env`, made on the
+   NAS without showing the token:
 
    ```bash
-   sudo docker image rm get-route-apple:1 mcr.microsoft.com/playwright/python:v1.63.0-noble
+   cd /volume1/docker/get-route-apple/deploy/nas && printf '\nAPPLEMAP_ADMIN_TOKEN=%s\nAPPLEMAP_PUBLIC_URL=https://applemap2.getcdn.link\n' "$(openssl rand -hex 32)" | sudo tee -a .env > /dev/null && sudo chmod 600 .env && echo added
    ```
+
+3. Make the database folder and rebuild:
 
    ```bash
-   sudo rm -rf /volume1/docker/get-route-apple/deploy/nas/debug /volume1/docker/apple-debug
+   sudo mkdir -p data && sudo chmod 700 data && sudo docker compose up -d --build
    ```
 
-## Apple's quota
+4. Check (no key needed):
 
-Apple allows 25,000 Maps Server API calls a day for the team; the token
-fetch every 25 minutes is separate. The container keeps inside it:
+   ```bash
+   sleep 5; curl -s http://localhost:8085/health; echo
+   ```
 
-| Setting | Default | What it does |
-|---|---|---|
-| `CACHE_SECONDS` | 1800 | Repeat trips are answered from memory for 30 minutes and cost no call. Points within about 100 m count as the same trip. |
-| `DAILY_LIMIT` | 24000 | Most calls per UTC day (resets 08:00 Malaysia time). Past it: 503 with `Retry-After`, so GET.ride moves on at once. |
-| `MAX_PER_MINUTE` | 20 | Most calls in any minute; extra lookups get a 503 at once, so one busy hour can't use up the day's quota. 20 a minute is ~28,800 a day, so `DAILY_LIMIT` still caps the total. `0` = no cap. |
-| `QUOTA_PAUSE` | 900 | After Apple answers 429 without saying how long, no calls for 15 minutes. |
-| `STALE_SECONDS` | 21600 | While paused, a trip asked in the last 6 hours is answered from memory with `"stale": true`. |
+   `{"status":"ok", ..., "apple_key_configured":true}`.
 
-`/health` with the key shows `calls_today`, `paused_seconds_left` and
-whether Apple's access token is valid. The memory cache is emptied when the
-container restarts.
+Then **Open the console** and **Give it its address** below.
 
-## When a lookup fails
+## Set it up from scratch (a NAS without it)
 
-| Error | Fix |
+1. Copy the code: `cd /volume1/docker && sudo git clone https://github.com/getgroupmy/get.route.apple.git get-route-apple`
+2. Put the key at `deploy/nas/secrets/apple_maps.p8` (File Station upload and
+   rename, or `scp -O` from your Mac), then `sudo chmod 600` it.
+3. In `deploy/nas`: `sudo cp .env.example .env`, fill in `APPLE_TEAM_ID`,
+   `APPLE_MAPS_KEY_ID` and `GET_ROUTE_NETWORK` (GET.route's network **name**:
+   `sudo docker inspect get-route-tunnel --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'`),
+   and make the admin token:
+
+   ```bash
+   sudo sed -i "s/^APPLEMAP_ADMIN_TOKEN=.*/APPLEMAP_ADMIN_TOKEN=$(openssl rand -hex 32)/" .env && sudo chmod 600 .env
+   ```
+
+4. `sudo mkdir -p data && sudo chmod 700 data && sudo docker compose up -d --build`
+
+## Give it its address
+
+1. Cloudflare Zero Trust › Networks › Tunnels › **GET.route's tunnel** (the
+   NAS's, `get-route-pool`) › Public hostnames › **Add**:
+   `applemap2.getcdn.link` → **HTTP** `get-route-apple:8000`.
+   `getcdn.link` is not behind GET.ride's subdomain worker, so nothing else
+   is needed there.
+2. Protect the console: Zero Trust › Access › Applications › **Add** a
+   self-hosted application for `applemap2.getcdn.link` with path `admin*`,
+   allowing only your team, as for `waze2.getcdn.link`. The API itself needs
+   an app's key for every call.
+3. Check from anywhere: `https://applemap2.getcdn.link/health`.
+
+## Open the console
+
+`https://applemap2.getcdn.link/admin` (or `http://NAS_IP:8085/admin` on the
+office network). The first time, **Use admin token instead** and paste it:
+
+```bash
+sudo grep '^APPLEMAP_ADMIN_TOKEN=' /volume1/docker/get-route-apple/deploy/nas/.env | cut -d= -f2
+```
+
+1. **Admins**: create your own user (role **owner**), then sign out and in
+   with it. Add your team with their roles.
+2. **Apple**: the key shows **accepted**. If not, **Get a new token** shows
+   Apple's reason.
+3. **Apps**: **Create key** for each app (`GET.ride fares`, `GET.teksi`, …).
+   Each key is shown **once**; it goes in that app's Apple Maps server
+   settings with the address `https://applemap2.getcdn.link`.
+4. **Settings**: Apple calls a day **4,500** once the Mac is live (24,000
+   while the NAS is the only server).
+
+## Move GET.ride over
+
+1. In the console, **Apps › Create key** `GET.ride fares (applemap2)` and
+   copy the key.
+2. GET.ride › Admin › Settings › **Fare AI provider** › Apple Maps servers:
+   add `https://applemap2.getcdn.link` with that key (below
+   `https://applemap.getcdn.link` once the Mac is set up). **Test**, **Save**.
+3. Remove the old server `https://apple.getride.my` from that list. **Save**.
+4. In the console's **Request log**, check GET.ride's calls arrive under the
+   new app, then **Apps › GET.ride (ROUTE_API_KEY) › Revoke**.
+5. Retire the old address: delete `apple.getride.my` from GET.route's tunnel,
+   remove `apple` from the subdomain worker's `PASS_THROUGH` (live worker,
+   the get-ride variable `SUBDOMAIN_PROXY_PASS_THROUGH` and `wrangler.toml`),
+   and delete the `ROUTE_API_KEY=` line from `.env` (otherwise the old key
+   comes back as an app on the next start), then `sudo docker compose up -d`.
+
+## Check and update
+
+- From anywhere: `https://applemap2.getcdn.link/health` answers `"status":"ok"`.
+  With an app's key it adds the Apple key's state and today's quota.
+- Logs: `sudo docker logs --tail 50 get-route-apple`.
+- Update: `cd /volume1/docker/get-route-apple && sudo git pull && cd deploy/nas && sudo docker compose up -d --build`.
+  `.env`, `secrets/` and `data/` are kept.
+- **Back up `deploy/nas/data/`** with the NAS's other backups: it holds the
+  apps (their key hashes), console users, settings and the audit trail.
+
+## The console
+
+| Tab | What it is for |
 |---|---|
-| `missing APPLE_TEAM_ID` / `the key file /run/secrets/apple_maps.p8` | Fill in `.env`, or put the key at `deploy/nas/secrets/apple_maps.p8`, then `sudo docker compose up -d`. |
-| `could not sign a token (is it the .p8 file?)` | The file isn't the key Apple gave you. Copy `AuthKey_….p8` again, unchanged. |
-| `Apple refused the Maps key (401)` | Team ID, Key ID and key file don't belong together, the key has no Maps (MapKit JS) service, or it was revoked. |
-| `apple maps rejected the request: …` (400) | Apple found no route or no such place. Try `lat,lng`, or a fuller address. |
-| 503 `quota` | See "Apple's quota". |
-| `Apple Maps did not answer` | The NAS can't reach `maps-api.apple.com` (internet or DNS). |
+| Overview | Calls, share answered, share from the cache, median and 9-in-10 times, calls by hour, by app and by source, Apple's quota today |
+| Request log | The newest 200 calls, or only the failures: app, endpoint, result, Apple or the cache, time. No places, coordinates or keys |
+| Apps | Create an app's key (shown once, stored as a hash), its calls a minute and its own Apple calls a day, replace or revoke its key |
+| Apple | The key's state, the access token, the quota; **Get a new token**, **End the quota pause**, **Empty the cache** |
+| Try it | One route through the service as an app's call goes; **Ask Apple** skips the cache |
+| Settings | Apple calls a day and a minute, the pause after Apple's 429, the cache, a new app's limit, how long the log is kept |
+| Admins | Console users and their roles (owner, admin, developer, viewer) |
+| Audit | Every change, by whom; **Check it hasn't been changed** verifies the hash chain |
 
-Container logs: `sudo docker logs --tail 50 get-route-apple`.
+Sign in with a username and password (scrypt-hashed; 5 wrong tries lock the
+name for 15 minutes), or with the admin token. Changing the admin token signs
+everyone out.
 
-## Security
+## Its own tunnel (without GET.route)
 
-- **No port is opened on the router.** `cloudflared` makes an outgoing
-  connection, and Cloudflare sends the hostname down it.
-- `LAN_PORT` (8085) opens a port **on the NAS only**, for the office
-  network. If only the tunnel should reach it, delete the two `ports:`
-  lines in `docker-compose.yml`. Never forward it on the router.
-- Every call except `/health` needs `X-Route-Key`, on the LAN port too.
-- The `.p8` key is mounted read-only and is ignored by git. Don't put it
-  anywhere else on the NAS. If it leaks, revoke it in Apple Developer ›
-  Keys, make a new one and replace the file.
-
-## What the NAS needs
-
-- Synology DSM 7.2+ with **Container Manager** (any CPU: the image is plain
-  Python).
-- About 200 MB of disk and 60 MB of memory.
-- Outgoing HTTPS to `maps-api.apple.com`.
+1. `sudo docker network create get-route-apple-net` and set
+   `GET_ROUTE_NETWORK=get-route-apple-net` in `.env`.
+2. Create a tunnel in Cloudflare (Docker), put its token in `TUNNEL_TOKEN`,
+   and add `applemap2.getcdn.link` → `http://get-route-apple:8000`.
+3. `sudo docker compose --profile own-tunnel up -d --build`

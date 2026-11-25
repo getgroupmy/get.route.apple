@@ -2,7 +2,7 @@
 import datetime
 import unittest
 
-from guard import Guard, RateLimited
+from app.guard import Guard, RateLimited
 
 NOON = datetime.datetime(2026, 11, 16, 12, 0, tzinfo=datetime.timezone.utc).timestamp()
 
@@ -21,7 +21,7 @@ class GuardTest(unittest.TestCase):
         g = Guard(daily=3, per_minute=0, pause=900, clock=c)
         for _ in range(3):
             g.take()
-        with self.assertRaisesRegex(RateLimited, "DAILY_LIMIT") as e:
+        with self.assertRaisesRegex(RateLimited, "daily limit") as e:
             g.take()
         self.assertEqual(e.exception.retry_after, 12 * 3600)
         c.t += 12 * 3600  # 00:00 UTC the next day
@@ -54,6 +54,16 @@ class GuardTest(unittest.TestCase):
         c.t += 121
         g.take()
         self.assertEqual(g.status()["refused_since_start"], 2)
+
+    def test_end_pause_and_start_day(self):
+        c = Clock()
+        g = Guard(daily=5, per_minute=0, pause=900, clock=c)
+        g.apple_said_429()
+        g.end_pause()
+        g.take()
+        g.start_day(5)  # e.g. 5 calls already in today's request log
+        with self.assertRaises(RateLimited):
+            g.take()
 
     def test_off(self):
         g = Guard(daily=0, per_minute=0, pause=900, clock=Clock())

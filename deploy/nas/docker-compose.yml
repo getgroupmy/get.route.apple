@@ -1,55 +1,56 @@
-# The Apple Maps route API on the office NAS (see README.md), set up the same
-# way as GET.route and the Traffic Scraper: one small container, reached
-# through GET.route's Cloudflare Tunnel, and on the NAS's LAN address.
+# GET.route Apple Maps on the office NAS (see README.md): the second Apple
+# Maps server. One small container, reached through GET.route's Cloudflare
+# Tunnel, with its own console at /admin:
 #
-#   apple.getride.my -> http://get-route-apple:8000   needs X-Route-Key
+#   applemap2.getcdn.link -> http://get-route-apple:8000   (an app's key in X-Route-Key)
 #
-# Answers come from Apple's official Maps Server API, signed with your Apple
-# Developer team's Maps key: put the key's .p8 file in ./secrets/ as
-# apple_maps.p8 and its Team ID and Key ID in .env.
+# (applemap.getcdn.link is the same service on the Mac mini, deploy/mac.)
 #
-# By default it joins GET.route's Docker network (GET_ROUTE_NETWORK in .env),
-# so GET.route's cloudflared can reach it by name. Without GET.route, start
-# it with its own tunnel instead (see README.md, "Its own tunnel").
+# It joins GET.route's Docker network (GET_ROUTE_NETWORK in .env), so
+# GET.route's cloudflared reaches it by name.
 
-# A fixed project name. GET.route's and the Traffic Scraper's compose files
-# also live in folders called deploy/nas; without this, all would be the
-# project "nas" and commands here could stop their containers.
+# A fixed project name. GET.route's compose files also live in folders called
+# deploy/nas; without this, both would be the project "nas".
 name: get-route-apple
 
 services:
   get-route-apple:
     build: ../..
-    image: get-route-apple:2
+    image: get-route-apple:3
     container_name: get-route-apple
     restart: unless-stopped
     environment:
       PORT: "8000"
-      ROUTE_API_KEY: ${ROUTE_API_KEY:?Set ROUTE_API_KEY in .env (openssl rand -hex 32)}
+      # The console at /admin: the owner's way in (24+ characters). Without it
+      # the console is closed; the API still answers apps with their keys.
+      APPLEMAP_ADMIN_TOKEN: ${APPLEMAP_ADMIN_TOKEN:-}
+      APPLEMAP_PUBLIC_URL: ${APPLEMAP_PUBLIC_URL:-https://applemap2.getcdn.link}
+      APPLEMAP_DATA_DIR: /data
+      # Optional: the old single key, kept working as an app until callers move.
+      ROUTE_API_KEY: ${ROUTE_API_KEY:-}
       # Apple Developer: Team ID, and the Key ID of the Maps key in ./secrets.
       APPLE_TEAM_ID: ${APPLE_TEAM_ID:?Set APPLE_TEAM_ID in .env (Apple Developer > Membership details)}
       APPLE_MAPS_KEY_ID: ${APPLE_MAPS_KEY_ID:?Set APPLE_MAPS_KEY_ID in .env (Apple Developer > Keys)}
       APPLE_MAPS_KEY_FILE: /run/secrets/apple_maps.p8
-      # Place names are looked up near here (empty = anywhere).
       SEARCH_LOCATION: ${SEARCH_LOCATION:-}
       LANGUAGE: ${LANGUAGE:-en-US}
-      # Apple allows 25,000 calls a day; repeats come from memory (30 min),
-      # and older answers are used while the quota is used up.
-      CACHE_SECONDS: ${CACHE_SECONDS:-1800}
-      STALE_SECONDS: ${STALE_SECONDS:-21600}
+      # Starting values only: the console's Settings change them.
       DAILY_LIMIT: ${DAILY_LIMIT:-24000}
       MAX_PER_MINUTE: ${MAX_PER_MINUTE:-20}
-      QUOTA_PAUSE: ${QUOTA_PAUSE:-900}
+      CACHE_SECONDS: ${CACHE_SECONDS:-1800}
+      STALE_SECONDS: ${STALE_SECONDS:-21600}
     expose:
       - "8000"
-    # Also on the NAS's own address (http://NAS_IP:8085) for apps on the
-    # office LAN. This opens no port on the router. Set LAN_PORT in .env;
-    # remove these two lines if only the tunnel should reach it.
+    # Also on the NAS's own address (http://NAS_IP:8085) for the office LAN.
+    # No port is opened on the router. Remove these two lines to allow only the tunnel.
     ports:
       - "${LAN_PORT:-8085}:8000"
     volumes:
       # The Apple Maps key (AuthKey_XXXXXXXXXX.p8, renamed apple_maps.p8). Read-only.
       - ./secrets:/run/secrets:ro
+      # The database: apps and their key hashes, console users, settings, the
+      # request log and the audit trail. Back it up with the NAS's other backups.
+      - ./data:/data
     networks:
       - default
       - get-route

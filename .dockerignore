@@ -6,9 +6,9 @@ env
 __pycache__/
 *.py[cod]
 .pytest_cache/
-test_*.py
-fake_apple.py
+tests/
 deploy/
+data/
 *.p8
 .env
 **/.DS_Store

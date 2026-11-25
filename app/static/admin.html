@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apple Maps console</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#16202c; --mute:#667085; --line:#e3e6eb; --brand:#1f6fb2;
+          --ok:#12805c; --bad:#c0362c; --warn:#b26a00; --info:#3b5bdb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#10151b; --card:#19212b; --ink:#e8edf3; --mute:#93a0b1; --line:#2a3542; --brand:#5aa9e6;
+            --ok:#3ecf9a; --bad:#ff7b72; --warn:#f0b34a; --info:#8da2ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { display:flex; gap:16px; align-items:center; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0 12px 0 0; }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav button { background:none; border:0; color:var(--mute); padding:8px 12px; border-radius:8px; font:inherit; cursor:pointer; }
+  nav button.on { background:var(--bg); color:var(--ink); font-weight:600; }
+  #who { margin-left:auto; color:var(--mute); font-size:13px; }
+  main { max-width:1180px; margin:0 auto; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  .scroll { overflow-x:auto; }
+  .scroll th, .scroll td { white-space:nowrap; }
+  .scroll td.wrap { white-space:normal; min-width:12rem; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--mute); font-weight:600; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; font-weight:600; border:1px solid currentColor; white-space:nowrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .info { color:var(--info); } .mute { color:var(--mute); font-size:13px; }
+  input, select { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); width:100%; }
+  label { display:block; font-size:12px; color:var(--mute); margin:10px 0 4px; }
+  button.btn { font:inherit; font-weight:600; padding:7px 13px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.btn:focus-visible, nav button:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+  button.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr)); gap:12px; align-items:end; }
+  .stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 16px; min-width:120px; }
+  .stat b { display:block; font-size:22px; font-variant-numeric:tabular-nums; }
+  .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .key { font-family:ui-monospace,monospace; word-break:break-all; }
+  td.acts { white-space:normal; min-width:14rem; } .acts .btn { margin:0 6px 6px 0; }
+  .hide { display:none !important; }
+  .spark { display:flex; gap:2px; align-items:flex-end; height:60px; }
+  .spark div { flex:1; background:var(--brand); border-radius:2px 2px 0 0; min-height:2px; opacity:.85; }
+  .spark div.f { background:var(--bad); }
+  .note { background:var(--bg); border-radius:8px; padding:10px 12px; margin-top:10px; }
+  .wrap { overflow-wrap:anywhere; }
+  .meter { height:8px; background:var(--bg); border-radius:99px; overflow:hidden; margin-top:6px; }
+  .meter div { height:100%; background:var(--brand); }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; margin:0; }
+  dt { color:var(--mute); font-size:13px; } dd { margin:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Apple Maps</h1>
+  <nav id="nav" class="hide">
+    <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="log">Request log</button>
+    <button data-tab="clients">Apps</button>
+    <button data-tab="apple">Apple</button>
+    <button data-tab="try">Try it</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="admins">Admins</button>
+    <button data-tab="audit">Audit</button>
+  </nav>
+  <span id="who"></span>
+  <button class="btn hide" id="logout" type="button">Sign out</button>
+</header>
+<main>
+  <p id="toast" class="note hide" role="status"></p>
+  <section id="closed" class="card hide" style="max-width:520px;margin:60px auto">
+    <h2>The console is closed</h2>
+    <p>Set <span class="key">APPLEMAP_ADMIN_TOKEN</span> (24 or more characters) in this service's settings and restart it. The API keeps answering apps in the meantime.</p>
+  </section>
+  <section id="login" class="card hide" style="max-width:420px;margin:60px auto">
+    <h2>Sign in</h2>
+    <form id="pwForm">
+      <label for="user">Username</label><input id="user" autocomplete="username">
+      <label for="pass">Password</label><input id="pass" type="password" autocomplete="current-password">
+      <label style="display:flex;gap:8px;align-items:center"><input id="remember" type="checkbox" style="width:auto"> Keep me signed in for 30 days</label>
+      <p id="loginErr" class="bad"></p>
+      <button class="btn primary" type="submit">Sign in</button>
+      <button class="btn" id="useToken" type="button" style="margin-left:6px">Use admin token instead</button>
+    </form>
+    <div id="tokenForm" class="hide">
+      <label for="token">Admin token (APPLEMAP_ADMIN_TOKEN)</label><input id="token" type="password" autocomplete="off">
+      <p class="mute">Kept only in this tab; closing it signs you out.</p>
+      <button class="btn primary" id="tokenBtn" type="button">Continue</button>
+    </div>
+    <p id="firstrun" class="mute hide">No console users yet. Sign in once with the admin token, then create your username and password under <b>Admins</b>.</p>
+  </section>
+
+  <section id="tab-overview" class="tab hide">
+    <div class="stats" id="ovStats"></div>
+    <div class="card"><h2>Apple's quota today (UTC day)</h2><div id="ovQuota"></div></div>
+    <div class="card"><h2>Calls in the last 24 hours, by hour</h2><div class="spark" id="ovSpark"></div><p class="mute" id="ovSparkNote"></p></div>
+    <div class="grid" style="align-items:start">
+      <div class="card"><h2>By app (24 h)</h2><div class="scroll"><table><thead><tr><th>App</th><th>Calls</th><th>Answered</th><th>Apple</th><th>Median</th></tr></thead><tbody id="ovClients"></tbody></table></div></div>
+      <div class="card"><h2>Where answers came from (24 h)</h2><div class="scroll"><table><thead><tr><th>Source</th><th>Calls</th><th>Answered</th><th>Median</th></tr></thead><tbody id="ovSources"></tbody></table></div></div>
+    </div>
+  </section>
+
+  <section id="tab-log" class="tab hide">
+    <div class="card">
+      <div class="bar" style="margin-bottom:10px">
+        <h2 style="margin:0">Request log</h2>
+        <label style="display:flex;gap:6px;align-items:center;margin:0 0 0 auto"><input id="logFailed" type="checkbox" style="width:auto"> Only failures</label>
+        <button class="btn" id="logRefresh" type="button">Refresh</button>
+      </div>
+      <p class="mute">The newest 200 calls. No places, coordinates or keys are kept: which app, which endpoint, where the answer came from and how long it took.</p>
+      <div class="scroll"><table><thead><tr><th>Time</th><th>App</th><th>Endpoint</th><th>Result</th><th>From</th><th>Took</th><th>Problem</th></tr></thead><tbody id="logRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="tab-clients" class="tab hide">
+    <div class="card" data-perm="clients.manage">
+      <h2>New app</h2>
+      <div class="grid">
+        <div><label for="cName">Name</label><input id="cName" placeholder="GET.ride fares"></div>
+        <div><label for="cRate">Calls a minute (most)</label><input id="cRate" type="number" min="1" placeholder="default"></div>
+        <div><label for="cDaily">Apple calls a day (most; empty = no own cap)</label><input id="cDaily" type="number" min="0" placeholder="no own cap"></div>
+        <div><button class="btn primary" id="cCreate" type="button">Create key</button></div>
+      </div>
+      <div id="cNew" class="note hide"></div>
+    </div>
+    <div class="card"><h2>Apps</h2>
+      <p class="mute">Each app sends its key in <span class="key">X-Route-Key</span> (or <span class="key">X-API-Key</span>). A revoked key stops working at once. Answers from the cache don't count toward an app's Apple calls.</p>
+      <div class="scroll"><table><thead><tr><th>App</th><th>Key</th><th>Limit</th><th>Apple calls today</th><th>Last minute</th><th>Last used</th><th></th></tr></thead><tbody id="cRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="tab-apple" class="tab hide">
+    <div class="card"><h2>Apple Maps Server API</h2>
+      <dl id="apInfo"></dl>
+      <div class="bar" style="margin-top:14px">
+        <button class="btn" id="apToken" data-perm="apple.manage" type="button">Get a new token</button>
+        <button class="btn" id="apEndPause" data-perm="apple.manage" type="button">End the quota pause</button>
+        <button class="btn" id="apClear" data-perm="apple.manage" type="button">Empty the cache</button>
+      </div>
+      <div id="apMsg" class="note hide"></div>
+      <p class="mute">The Apple key (Team ID, Key ID and the <span class="key">.p8</span> file) is set in this service's settings on the machine, never here. A new token costs no quota; it checks that Apple accepts the key.</p>
+    </div>
+  </section>
+
+  <section id="tab-try" class="tab hide">
+    <div class="card"><h2>Try it</h2>
+      <p class="mute">One route through the service as an app's call goes: the cache first, then Apple within the quota. "Ask Apple" skips the cache and spends one Apple call.</p>
+      <div class="grid">
+        <div><label for="tFrom">From (lat,lng or a place)</label><input id="tFrom" value="3.158,101.712"></div>
+        <div><label for="tTo">To</label><input id="tTo" value="3.134,101.686"></div>
+        <div><label style="display:flex;gap:6px;align-items:center"><input id="tSkip" type="checkbox" style="width:auto"> Ask Apple (skip the cache)</label></div>
+        <div><button class="btn primary" id="tGo" type="button">Find the route</button></div>
+      </div>
+      <div id="tOut" class="note hide"></div>
+    </div>
+  </section>
+
+  <section id="tab-settings" class="tab hide">
+    <div class="card"><h2>Apple's quota</h2>
+      <p class="mute">Apple allows 25,000 calls a day for the whole Apple Developer team. When both the Mac mini and the NAS run this service, their daily limits together must stay under 25,000 (e.g. 20,000 on the Mac, 4,500 on the NAS).</p>
+      <div class="grid">
+        <div><label for="stDaily">Apple calls a UTC day (most; 0 = no cap)</label><input id="stDaily" type="number"></div>
+        <div><label for="stMinute">Apple calls in any minute (most; 0 = no cap)</label><input id="stMinute" type="number"></div>
+        <div><label for="stPause">Pause after Apple's 429 (s)</label><input id="stPause" type="number"></div>
+      </div>
+    </div>
+    <div class="card"><h2>Cache, apps and the log</h2>
+      <div class="grid">
+        <div><label for="stCache">Answer repeat trips from memory for (s)</label><input id="stCache" type="number"></div>
+        <div><label for="stStale">While paused, answer cached trips up to (s old)</label><input id="stStale" type="number"></div>
+        <div><label for="stRate">A new app's calls a minute</label><input id="stRate" type="number"></div>
+        <div><label for="stDays">Keep the request log (days)</label><input id="stDays" type="number"></div>
+      </div>
+      <div class="bar" style="margin-top:14px" data-perm="settings.manage"><button class="btn primary" id="stSave" type="button">Save</button></div>
+      <p class="mute" id="stMsg"></p>
+    </div>
+  </section>
+
+  <section id="tab-admins" class="tab hide">
+    <div class="card"><h2>Console users</h2>
+      <p class="mute">Each person signs in with their own username and password; the audit trail shows who changed what. Entering an existing username changes its role and, if given, its password.</p>
+      <div class="grid">
+        <div><label for="aUser">Username</label><input id="aUser"></div>
+        <div><label for="aPass">Password (10+ characters)</label><input id="aPass" type="password" autocomplete="new-password"></div>
+        <div><label for="aRole">Role</label><select id="aRole"></select></div>
+        <div><button class="btn primary" id="aSave" type="button">Save user</button></div>
+      </div>
+      <p class="mute" id="aMsg"></p>
+      <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Last sign-in</th><th></th></tr></thead><tbody id="aRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="tab-audit" class="tab hide">
+    <div class="card"><div class="bar" style="margin-bottom:10px"><h2 style="margin:0">Audit trail</h2><button class="btn" id="auVerify" type="button" style="margin-left:auto">Check it hasn't been changed</button></div>
+      <p class="mute" id="auMsg"></p>
+      <div class="scroll"><table><thead><tr><th>Time</th><th>Who</th><th>What</th><th>On</th><th>Detail</th></tr></thead><tbody id="auRows"></tbody></table></div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let token = sessionStorage.getItem("amToken") || "";
+let me = null;
+
+function h(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+const when = s => s ? new Date(s).toLocaleString() : "";
+const ms = v => v == null ? "–" : (v / 1000).toFixed(1) + " s";
+const num = v => v == null ? "–" : Number(v).toLocaleString();
+const dur = s => !s ? "–" : s >= 3600 ? (s / 3600).toFixed(1).replace(/\.0$/, "") + " h" : s >= 60 ? Math.round(s / 60) + " min" : s + " s";
+const can = p => me && me.permissions && me.permissions.includes(p);
+const SOURCES = { apple: ["Apple", "ok"], cache: ["cache", "info"], stale: ["cache (stale)", "warn"] };
+
+async function api(path, opts = {}) {
+  const r = await fetch("/admin/api" + path, { ...opts, headers: { ...(token ? { "X-Admin-Token": token } : {}), ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+  if (r.status === 401) { show(false); throw new Error("signed out"); }
+  if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(typeof m === "string" ? m : JSON.stringify(m)); }
+  return r.status === 204 ? null : r.json();
+}
+
+async function refreshMe() {
+  const r = await fetch("/admin/session/me", { headers: token ? { "X-Admin-Token": token } : {} });
+  me = await r.json();
+  show(me.signed_in);
+}
+
+function show(authed) {
+  const closed = !!(me && me.closed);
+  $("closed").classList.toggle("hide", !closed);
+  $("login").classList.toggle("hide", authed || closed);
+  $("nav").classList.toggle("hide", !authed);
+  $("logout").classList.toggle("hide", !authed);
+  $("who").textContent = authed ? (me.username || "admin token") + " · " + me.role : "";
+  $("firstrun").classList.toggle("hide", authed || !me || me.has_users || closed);
+  if (!authed) { document.querySelectorAll(".tab").forEach(t => t.classList.add("hide")); return; }
+  document.querySelectorAll("[data-perm]").forEach(e => e.classList.toggle("hide", !can(e.dataset.perm)));
+  const allowed = { overview: "overview.view", log: "overview.view", clients: "clients.view", apple: "apple.view", try: "tests.run", settings: "apple.view", admins: "admins.manage", audit: "audit.view" };
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("hide", !can(allowed[b.dataset.tab])));
+  const first = [...document.querySelectorAll("nav button")].find(b => !b.classList.contains("hide"));
+  if (first) open(first.dataset.tab);
+}
+
+function open(tab) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("hide", t.id !== "tab-" + tab));
+  lastAuto[tab] = Date.now();
+  ({ overview: loadOverview, log: loadLog, clients: loadClients, apple: loadApple, settings: loadSettings, admins: loadAdmins, audit: loadAudit }[tab] || (() => {}))();
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => open(b.dataset.tab));
+
+function quotaBlock(q) {
+  const used = q.daily_limit ? Math.min(100, Math.round(100 * q.calls_today / q.daily_limit)) : 0;
+  return h("div", {},
+    h("div", { class: "bar" }, h("b", {}, `${num(q.calls_today)} of ${q.daily_limit ? num(q.daily_limit) : "no cap"}`), h("span", { class: "mute" }, "Apple calls today (resets 00:00 UTC, 08:00 in Malaysia)"),
+      q.paused_seconds_left ? h("span", { class: "pill bad" }, "paused " + dur(q.paused_seconds_left)) : h("span", { class: "pill ok" }, "calling Apple")),
+    q.daily_limit ? h("div", { class: "meter" }, h("div", { style: `width:${used}%` })) : "",
+    h("p", { class: "mute" }, `${q.calls_last_minute} in the last minute (most ${q.max_per_minute || "no cap"}) · ${num(q.refused_since_start)} refused since start` + (q.last_pause ? ` · last pause: ${q.last_pause}` : "")));
+}
+
+async function loadOverview() {
+  const o = await api("/overview");
+  const pct = o.calls_24h ? Math.round(100 * o.ok_24h / o.calls_24h) + "%" : "–";
+  const cachePct = o.calls_24h ? Math.round(100 * o.from_cache_24h / o.calls_24h) + "%" : "–";
+  $("ovStats").replaceChildren(
+    h("div", { class: "stat" }, h("b", {}, num(o.calls_24h)), "calls (24 h)"),
+    h("div", { class: "stat" }, h("b", {}, pct), "answered"),
+    h("div", { class: "stat" }, h("b", {}, cachePct), "from the cache"),
+    h("div", { class: "stat" }, h("b", {}, ms(o.p50_ms)), "median time"),
+    h("div", { class: "stat" }, h("b", {}, ms(o.p90_ms)), "9 in 10 within"),
+    h("div", { class: "stat" }, h("b", {}, num(o.quota_503_24h)), "quota pauses (503)"),
+    h("div", { class: "stat" }, h("b", {}, num(o.failed_24h)), "failed"),
+    h("div", { class: "stat" }, h("b", {}, num(o.refused_24h)), "refused (key or limit)"),
+    h("div", { class: "stat" }, h("b", { class: o.apple.configured && !o.apple.token_error ? "ok" : "bad" }, o.apple.configured ? (o.apple.token_error ? "refused" : "ready") : "not set"), "Apple key"));
+  $("ovQuota").replaceChildren(quotaBlock(o.apple.quota), o.apple.last_error ? h("p", { class: "mute wrap" }, "Last problem: " + o.apple.last_error + " (" + when(o.apple.last_error_at) + ")") : "");
+  const max = Math.max(1, ...o.by_hour.map(d => d.calls));
+  $("ovSpark").replaceChildren(...o.by_hour.map(d => h("div", { class: d.ok < d.calls ? "f" : "", style: `height:${Math.max(3, 100 * d.calls / max)}%`, title: `${new Date(d.hour).toLocaleString()}: ${d.calls} calls, ${d.ok} answered` })));
+  $("ovSparkNote").textContent = o.by_hour.length ? "Red: an hour with at least one call that wasn't answered. Hover a bar for its numbers." : "No calls yet.";
+  const none = n => [h("tr", {}, h("td", { colspan: n, class: "mute" }, "None yet."))];
+  $("ovClients").replaceChildren(...(o.by_client.length ? o.by_client.map(d => h("tr", {}, h("td", {}, d.name), h("td", {}, num(d.calls)), h("td", {}, num(d.ok)), h("td", {}, num(d.apple_calls)), h("td", {}, ms(d.p50_ms)))) : none(5)));
+  $("ovSources").replaceChildren(...(o.by_source.length ? o.by_source.map(d => h("tr", {}, h("td", {}, d.name === "(none)" ? "not answered" : d.name), h("td", {}, num(d.calls)), h("td", {}, num(d.ok)), h("td", {}, ms(d.p50_ms)))) : none(4)));
+}
+
+async function loadLog() {
+  const rows = await api("/logs?limit=200" + ($("logFailed").checked ? "&failed=true" : ""));
+  $("logRows").replaceChildren(...(rows.length ? rows.map(r => h("tr", {},
+    h("td", {}, when(r.at)), h("td", {}, r.app || (r.endpoint === "try-it" ? "Try it" : "")), h("td", {}, r.endpoint),
+    h("td", {}, h("span", { class: "pill " + (r.ok ? "ok" : r.status === 400 || r.status === 404 ? "warn" : "bad") }, r.status)),
+    h("td", {}, r.source ? h("span", { class: SOURCES[r.source] ? SOURCES[r.source][1] : "" }, SOURCES[r.source] ? SOURCES[r.source][0] : r.source) : "–"),
+    h("td", {}, ms(r.latency_ms)), h("td", { class: "wrap mute" }, r.error || ""))) : [h("tr", {}, h("td", { colspan: 7, class: "mute" }, "No calls yet."))]));
+}
+$("logRefresh").onclick = loadLog; $("logFailed").onchange = loadLog;
+
+function showKey(c) {
+  const where = (me && me.public_url) || location.origin;
+  $("cNew").replaceChildren(h("b", {}, `Key for ${c.name}: `), h("span", { class: "key" }, c.api_key),
+    h("p", { class: "mute" }, `Copy it now: it is shown only once. The app sends it as X-Route-Key to ${where} (GET.ride: Admin › Settings › Fare AI provider › Apple Maps servers).`));
+  $("cNew").classList.remove("hide");
+}
+async function loadClients() {
+  const list = await api("/clients");
+  const manage = can("clients.manage");
+  $("cRows").replaceChildren(...(list.length ? list.map(c => h("tr", {},
+    h("td", {}, c.name, c.active ? "" : h("span", { class: "pill bad", style: "margin-left:6px" }, "revoked")),
+    h("td", { class: "key" }, c.key_prefix + "…"),
+    h("td", {}, c.rate_per_minute + "/min", c.daily_limit ? h("div", { class: "mute" }, num(c.daily_limit) + " Apple/day") : ""),
+    h("td", {}, num(c.apple_calls_today)), h("td", {}, c.calls_last_minute), h("td", {}, when(c.last_used_at) || "never"),
+    h("td", { class: "acts" }, manage ? [
+      h("button", { class: "btn", onclick: async () => { const v = prompt("Calls a minute (most) for " + c.name, c.rate_per_minute); if (v) { await api(`/clients/${c.id}`, { method: "PUT", body: JSON.stringify({ rate_per_minute: +v }) }); loadClients(); } } }, "Limit"),
+      h("button", { class: "btn", onclick: async () => { const v = prompt("Apple calls a day (most) for " + c.name + " (0 = no own cap)", c.daily_limit); if (v !== null && v !== "") { await api(`/clients/${c.id}`, { method: "PUT", body: JSON.stringify({ daily_limit: +v }) }); loadClients(); } } }, "Daily cap"),
+      h("button", { class: "btn", onclick: async () => { if (confirmIn(`New key for ${c.name}? The old key stops working at once.`)) { showKey(await api(`/clients/${c.id}/rotate`, { method: "POST" })); loadClients(); } } }, "New key"),
+      h("button", { class: "btn danger", onclick: async () => { await api(`/clients/${c.id}`, { method: "PUT", body: JSON.stringify({ active: !c.active }) }); loadClients(); } }, c.active ? "Revoke" : "Turn on"),
+      c.active ? null : h("button", { class: "btn danger", onclick: async () => { if (confirmIn(`Delete ${c.name} for good?`)) { await api(`/clients/${c.id}`, { method: "DELETE" }); loadClients(); } } }, "Delete"),
+    ] : ""))) : [h("tr", {}, h("td", { colspan: 7, class: "mute" }, "No apps yet: create one above."))]));
+}
+$("cCreate").onclick = async () => {
+  const name = $("cName").value.trim(); if (!name) return;
+  const body = { name }; if ($("cRate").value) body.rate_per_minute = +$("cRate").value; if ($("cDaily").value) body.daily_limit = +$("cDaily").value;
+  try { showKey(await api("/clients", { method: "POST", body: JSON.stringify(body) })); for (const id of ["cName", "cRate", "cDaily"]) $(id).value = ""; loadClients(); }
+  catch (e) { $("cNew").textContent = e.message; $("cNew").classList.remove("hide"); }
+};
+
+// The page can't show confirm() dialogs in every host, so a second click confirms.
+const pending = {};
+function confirmIn(msg) { if (pending[msg] && Date.now() - pending[msg] < 6000) { delete pending[msg]; return true; } pending[msg] = Date.now(); flash(msg + " Click again to confirm."); return false; }
+function flash(msg) { $("toast").textContent = msg; $("toast").classList.remove("hide"); clearTimeout(flash.t); flash.t = setTimeout(() => $("toast").classList.add("hide"), 6000); }
+
+async function loadApple() {
+  const a = await api("/apple");
+  const keyState = a.configured ? (a.token_error ? h("span", { class: "pill bad" }, "refused") : a.token_valid_seconds ? h("span", { class: "pill ok" }, "accepted") : h("span", { class: "pill mute" }, "not checked yet")) : h("span", { class: "pill bad" }, "not set up");
+  $("apInfo").replaceChildren(
+    h("dt", {}, "Key"), h("dd", {}, keyState, a.missing.length ? h("div", { class: "bad mute" }, "Missing: " + a.missing.join(", ")) : "", a.token_error ? h("div", { class: "bad mute wrap" }, a.token_error) : ""),
+    h("dt", {}, "Team ID / Key ID"), h("dd", { class: "key" }, (a.team_id || "–") + " / " + (a.key_id || "–")),
+    h("dt", {}, "Access token"), h("dd", {}, a.token_valid_seconds ? `valid ${dur(a.token_valid_seconds)} more (renewed automatically)` : "none yet (fetched on the next lookup)", h("span", { class: "mute" }, ` · ${a.token_renewals} fetched since start`)),
+    h("dt", {}, "Quota"), h("dd", {}, quotaBlock(a.quota)),
+    h("dt", {}, "Cache"), h("dd", {}, `${num(a.cached_trips)} trips in memory`),
+    h("dt", {}, "Place names near"), h("dd", {}, a.search_location || "anywhere", h("span", { class: "mute" }, " · roads in " + a.language)),
+    h("dt", {}, "Last answer"), h("dd", {}, when(a.last_ok_at) || "none yet"),
+    h("dt", {}, "Last problem"), h("dd", { class: "wrap" }, a.last_error ? `${a.last_error} (${when(a.last_error_at)})` : "none"),
+    h("dt", {}, "Apps call"), h("dd", { class: "key" }, a.public_url || location.origin));
+}
+async function appleAction(path, done) {
+  $("apMsg").textContent = "Working…"; $("apMsg").classList.remove("hide");
+  try { const r = await api(path, { method: "POST" }); $("apMsg").textContent = done(r); } catch (e) { $("apMsg").textContent = e.message; }
+  loadApple();
+}
+$("apToken").onclick = () => appleAction("/apple/token", r => r.ok ? `Apple accepted the key: the token is valid ${dur(r.token_valid_seconds)}.` : "Apple refused: " + r.error);
+$("apEndPause").onclick = () => appleAction("/apple/end-pause", () => "Calls to Apple are allowed again (the daily and minute limits still apply).");
+$("apClear").onclick = () => { if (confirmIn("Empty the cache? The next lookups all go to Apple.")) appleAction("/apple/clear-cache", r => `${r.cleared} trips removed from the cache.`); };
+
+$("tGo").onclick = async () => {
+  $("tGo").disabled = true; $("tOut").textContent = "Asking…"; $("tOut").classList.remove("hide");
+  try { const r = await api("/try", { method: "POST", body: JSON.stringify({ from: $("tFrom").value, to: $("tTo").value, skip_cache: $("tSkip").checked }) });
+    const src = SOURCES[r.source] ? SOURCES[r.source][0] : "nowhere";
+    $("tOut").replaceChildren(h("b", { class: r.status === 200 ? "ok" : "bad" }, r.status === 200 ? "Answered" : r.status === 400 ? "No route" : "Not answered (" + r.status + ")"), ` from ${src} in ${ms(r.latency_ms)}: `, r.summary);
+  } catch (e) { $("tOut").textContent = e.message; }
+  $("tGo").disabled = false;
+};
+
+const ST = { stDaily: "daily_limit", stMinute: "max_per_minute", stPause: "quota_pause", stCache: "cache_seconds", stStale: "stale_seconds", stRate: "default_rate_per_minute", stDays: "log_retention_days" };
+async function loadSettings() {
+  const s = await api("/settings");
+  const ro = !can("settings.manage");
+  for (const [id, k] of Object.entries(ST)) { $(id).value = s[k]; $(id).disabled = ro; $(id).min = s.limits[k][0]; $(id).max = s.limits[k][1]; }
+}
+$("stSave").onclick = async () => {
+  const body = {}; for (const [id, k] of Object.entries(ST)) body[k] = +$(id).value;
+  try { await api("/settings", { method: "PUT", body: JSON.stringify(body) }); $("stMsg").textContent = "Saved."; loadSettings(); }
+  catch (e) { $("stMsg").textContent = e.message; }
+};
+
+async function loadAdmins() {
+  const [roles, list] = await Promise.all([api("/roles"), api("/admins")]);
+  $("aRole").replaceChildren(...roles.map(r => h("option", { value: r.id }, r.label)));
+  $("aRows").replaceChildren(...(list.length ? list.map(a => h("tr", {}, h("td", {}, a.username), h("td", {}, a.role), h("td", {}, when(a.last_login_at) || "never"),
+    h("td", { class: "acts" }, h("button", { class: "btn danger", onclick: async () => { if (confirmIn(`Remove ${a.username}?`)) { try { await api(`/admins/${encodeURIComponent(a.username)}`, { method: "DELETE" }); } catch (e) { $("aMsg").textContent = e.message; } loadAdmins(); } } }, "Remove")))) : [h("tr", {}, h("td", { colspan: 4, class: "mute" }, "No users yet."))]));
+}
+$("aSave").onclick = async () => {
+  const body = { username: $("aUser").value.trim(), role: $("aRole").value }; if ($("aPass").value) body.password = $("aPass").value;
+  try { const r = await api("/admins", { method: "POST", body: JSON.stringify(body) }); $("aMsg").textContent = r.changed ? `${r.username} updated (role ${r.role}).` : `${r.username} can now sign in as ${r.role}.`; $("aPass").value = ""; loadAdmins(); }
+  catch (e) { $("aMsg").textContent = e.message; }
+};
+
+async function loadAudit() {
+  const rows = await api("/audit?limit=200");
+  $("auRows").replaceChildren(...(rows.length ? rows.map(a => h("tr", {}, h("td", {}, when(a.at)), h("td", {}, a.actor), h("td", {}, a.action), h("td", {}, a.target || ""), h("td", { class: "wrap mute" }, a.detail || ""))) : [h("tr", {}, h("td", { colspan: 5, class: "mute" }, "Nothing yet."))]));
+}
+$("auVerify").onclick = async () => { const r = await api("/audit/verify"); $("auMsg").textContent = r.ok ? `All ${r.rows_checked} entries check out.` : `Changed: entry ${r.broken_at_id} doesn't fit the ones before it.`; };
+
+$("pwForm").onsubmit = async e => {
+  e.preventDefault();
+  const r = await fetch("/admin/session/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: $("user").value, password: $("pass").value, remember: $("remember").checked }) });
+  if (!r.ok) { $("loginErr").textContent = r.status === 429 ? "Too many attempts: wait 15 minutes." : "Wrong username or password."; return; }
+  $("pass").value = ""; $("loginErr").textContent = ""; refreshMe();
+};
+$("useToken").onclick = () => { $("tokenForm").classList.remove("hide"); $("pwForm").classList.add("hide"); $("token").focus(); };
+$("tokenBtn").onclick = async () => { token = $("token").value.trim(); sessionStorage.setItem("amToken", token); $("token").value = ""; await refreshMe(); if (!me.signed_in) { $("loginErr").textContent = "That token is not right."; $("pwForm").classList.remove("hide"); $("tokenForm").classList.add("hide"); } };
+$("token").addEventListener("keydown", e => e.key === "Enter" && $("tokenBtn").click());
+$("logout").onclick = async () => { token = ""; sessionStorage.removeItem("amToken"); await fetch("/admin/session/logout", { method: "POST" }); refreshMe(); };
+// The open tab keeps itself up to date: Request log and Apple every 15 s,
+// Overview every 30 s. It waits while you type in a box and while the browser
+// tab is in the background (and catches up when it is back).
+const AUTO = { log: [() => loadLog(), 15000], apple: [() => loadApple(), 15000], overview: [() => loadOverview(), 30000] };
+let lastAuto = {};
+function autoUpdate() {
+  if (!me || !me.signed_in || document.hidden) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === "TEXTAREA" || a.tagName === "SELECT" || (a.tagName === "INPUT" && a.type !== "checkbox"))) return;
+  for (const [tab, [load, every]] of Object.entries(AUTO)) {
+    if ($("tab-" + tab).classList.contains("hide") || Date.now() - (lastAuto[tab] || 0) < every) continue;
+    lastAuto[tab] = Date.now();
+    load().catch(() => {});
+  }
+}
+setInterval(autoUpdate, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { lastAuto = {}; autoUpdate(); } });
+refreshMe();
+</script>
+</body>
+</html>
