@@ -52,6 +52,15 @@ jobs:
           APPLE_MAPS_KEY_ID: KEY1234567
         run: docker compose config --quiet
 
+      - name: Check the Mac mini compose file
+        working-directory: deploy/mac
+        env:
+          ROUTE_API_KEY: ci
+          APPLE_TEAM_ID: TEAM123456
+          APPLE_MAPS_KEY_ID: KEY1234567
+          TUNNEL_TOKEN: ci-token
+        run: docker compose config --quiet
+
       - name: Build the image
         run: docker build -t get-route-apple:ci .
 

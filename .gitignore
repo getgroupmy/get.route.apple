@@ -18,6 +18,6 @@ Thumbs.db
 # Local secrets: never commit .env or an Apple key
 .env
 *.p8
-deploy/nas/secrets/*
-# ...but keep the NAS key folder, which Synology's Docker won't create itself
-!deploy/nas/secrets/.gitkeep
+deploy/*/secrets/*
+# ...but keep the key folders (Synology's Docker won't create them itself)
+!deploy/*/secrets/.gitkeep
