@@ -18,6 +18,12 @@ There's no browser in this container: each lookup is one HTTPS call to
 Apple, signed with your Apple Developer team's Maps key. It needs about
 60 MB of memory and answers in well under a second.
 
+**The NAS is the backup.** The office Mac mini runs the same service as the
+primary at `apple-mac.getride.my` (see [`../mac/README.md`](../mac/README.md)).
+GET.ride's Fare AI lists the Mac above the NAS, so the NAS answers only
+while the Mac is down. Set `DAILY_LIMIT=4500` in this `.env`: Apple's
+25,000 calls a day are shared by both machines, and the Mac has 20,000.
+
 ## Get an Apple Maps key
 
 You need a paid **Apple Developer Program** membership (US$99 a year,

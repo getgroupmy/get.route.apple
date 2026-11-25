@@ -13,8 +13,19 @@ It is the third route source next to:
 All three run on the office Synology NAS and are reached through GET.route's
 Cloudflare Tunnel with the same `X-Route-Key`. Unlike the other two, this one
 needs no browser: it is one HTTPS call to Apple, signed with your Apple
-Developer team's Maps key. **To put it on the NAS, see
-[`deploy/nas/README.md`](deploy/nas/README.md).**
+Developer team's Maps key, so it also runs on a Mac.
+
+It runs in two places, as primary and backup:
+
+| Where | Hostname | Role | Guide |
+|---|---|---|---|
+| Office Mac mini | `apple-mac.getride.my` | **Primary** (its own tunnel) | [`deploy/mac/README.md`](deploy/mac/README.md) |
+| Office NAS | `apple.getride.my` | **Backup** (GET.route's tunnel) | [`deploy/nas/README.md`](deploy/nas/README.md) |
+
+GET.ride's Fare AI lists the Mac above the NAS and moves to the next server
+when one fails, so the NAS answers only while the Mac is down. Apple's daily
+quota is shared, so the Mac's `DAILY_LIMIT` (20,000) plus the NAS's (4,500)
+stays under Apple's 25,000.
 
 ## Asking it for a route
 
@@ -141,7 +152,8 @@ required.
 | `guard.py` | Apple's quota: daily cap, optional per-minute cap, pause after a 429 |
 | `config.py` | Every setting, from environment variables |
 | `Dockerfile` | A small Python image (no browser) |
-| `deploy/nas/` | Docker Compose, `.env.example`, `secrets/` for the key, and the setup guide |
+| `deploy/mac/` | Docker Compose with its own tunnel, `.env.example`, `secrets/`, and the guide for the Mac mini (primary) |
+| `deploy/nas/` | Docker Compose, `.env.example`, `secrets/` for the key, and the setup guide for the NAS (backup) |
 
 ## Security
 
