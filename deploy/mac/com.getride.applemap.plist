@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Starts GET.route Apple Maps at login and again if it stops. Copy to
+     ~/Library/LaunchAgents/ with /Users/YOU/get.route.apple replaced by where
+     the repository is (README.md does both). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.getride.applemap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/YOU/get.route.apple/deploy/mac/start.sh</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/get.route.apple/deploy/mac/logs/applemap.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/get.route.apple/deploy/mac/logs/applemap.log</string>
+</dict>
+</plist>

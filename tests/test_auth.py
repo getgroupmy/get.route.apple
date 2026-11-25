@@ -9,9 +9,9 @@ from unittest import mock
 
 import jwt
 
-import apple_auth
-from apple_auth import AuthError, TokenSource, make_auth_token
-from fake_apple import KEY_ID, TEAM, FakeApple, make_key_file
+from app import apple_auth
+from app.apple_auth import AuthError, TokenSource, make_auth_token
+from tests.fake_apple import KEY_ID, TEAM, FakeApple, make_key_file
 
 
 class AuthTest(unittest.TestCase):

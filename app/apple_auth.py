@@ -16,7 +16,7 @@ import time
 
 import jwt
 
-import config
+from . import config
 
 AUTH_TOKEN_LIFETIME = 3600       # the JWT we sign lives an hour; only /v1/token sees it
 RENEW_BEFORE = 300               # renew the access token 5 minutes before it expires

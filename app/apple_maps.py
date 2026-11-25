@@ -19,7 +19,7 @@ doesn't break every lookup.
 """
 from urllib.parse import quote
 
-import config
+from . import config
 
 
 class NoRouteError(ValueError):

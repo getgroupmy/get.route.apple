@@ -1,43 +1,48 @@
-# GET.route Apple Maps
+# GET.route Apple Maps (applemap.getcdn.link, applemap2.getcdn.link)
 
-A small API that answers with **Apple Maps' drive time and distance** between
-two places, from Apple's official **Maps Server API**. It returns them in
-**GET.route's `/routes/search` format**, so a caller that already uses
-GET.route (Waze) or the Traffic Scraper (Google Maps) sends the same request.
+**Apple Maps' drive time and distance** for GET's own apps, from Apple's
+official **Maps Server API**, with a console at `/admin` (sign-in, roles,
+per-app keys and limits, request log, audit trail), the same way GET.route's
+console does it for Waze.
 
-It is the third route source next to:
+It answers in **GET.route's `/routes/search` format**, so an app that already
+talks to a route server (GET.ride's Fare AI) only needs the address and its
+own key. It is the Apple Maps step next to:
 
-- [getgroupmy/get.route](https://github.com/getgroupmy/get.route): Waze, a pool of 16 containers;
+- [getgroupmy/get.route](https://github.com/getgroupmy/get.route): Waze (`waze.getcdn.link`, `waze2.getcdn.link`);
 - [getgroupmy/get.route.backup](https://github.com/getgroupmy/get.route.backup): Google Maps (Traffic Scraper).
 
-All three run on the office Synology NAS and are reached through GET.route's
-Cloudflare Tunnel with the same `X-Route-Key`. Unlike the other two, this one
-needs no browser: it is one HTTPS call to Apple, signed with your Apple
-Developer team's Maps key, so it also runs on a Mac.
+It runs twice, so Apple Maps keeps answering when either machine is down:
 
-It runs in two places, as primary and backup:
+```
+                 ┌─► applemap.getcdn.link   ─► Apple Maps on the Mac mini (deploy/mac)  first
+ GET.ride ───────┤
+ other apps      └─► applemap2.getcdn.link  ─► Apple Maps on the NAS      (deploy/nas)  second
+ (an app's key on each)                    each ──https──► Apple Maps Server API (one Apple key)
+```
 
-| Where | Hostname | Role | Guide |
-|---|---|---|---|
-| Office Mac mini | `apple-mac.getride.my` | **Primary** (its own tunnel) | [`deploy/mac/README.md`](deploy/mac/README.md) |
-| Office NAS | `apple.getride.my` | **Backup** (GET.route's tunnel) | [`deploy/nas/README.md`](deploy/nas/README.md) |
+| Where | Address | Guide |
+|---|---|---|
+| Office Mac mini (first) | `https://applemap.getcdn.link` | [`deploy/mac/README.md`](deploy/mac/README.md) |
+| Office NAS (second) | `https://applemap2.getcdn.link` | [`deploy/nas/README.md`](deploy/nas/README.md) |
 
-GET.ride's Fare AI lists the Mac above the NAS and moves to the next server
-when one fails, so the NAS answers only while the Mac is down. Apple's daily
-quota is shared, so the Mac's `DAILY_LIMIT` (20,000) plus the NAS's (4,500)
-stays under Apple's 25,000.
+Apps list both, the Mac first, and move to the NAS when the Mac doesn't
+answer. The two share nothing (each has its own apps and keys, users,
+settings, log and audit trail); both sign with the same Apple key, so Apple's
+25,000 calls a day are split in their **Settings**: Mac 20,000, NAS 4,500.
 
 ## Asking it for a route
 
 ```bash
-curl -s -H "X-Route-Key: $ROUTE_API_KEY" \
-  "https://apple.getride.my/routes/search?from=3.1579,101.7116&to=Beranang,Selangor"
+curl -s -H "X-Route-Key: $APP_KEY" \
+  "https://applemap.getcdn.link/routes/search?from=3.1579,101.7116&to=Beranang,Selangor"
 ```
 
+- The key is **the app's own**, made in the console's **Apps** tab, sent as
+  `X-Route-Key` (or `X-API-Key`).
 - `from` / `to`: `lat,lng`, or an address or place name (up to 200
-  characters). Names are looked up near `SEARCH_LOCATION` (Kuala Lumpur in
-  the NAS's `.env`).
-- `depart_at` or `arrive_at`: plan a trip for another time, in ISO 8601
+  characters), looked up near `SEARCH_LOCATION` (Kuala Lumpur).
+- `depart_at` or `arrive_at`: a planned trip, ISO 8601
   (`2026-11-17T08:00+08:00`; no zone = UTC), as on GET.route.
 - `/waze/routes/search` works too, as on GET.route.
 
@@ -57,108 +62,129 @@ curl -s -H "X-Route-Key: $ROUTE_API_KEY" \
      "is_fastest": false, "is_toll": false, "...": "..."}
   ],
   "source": "apple_maps",
-  "fetched_at": "2026-11-16T03:30:00Z"
+  "fetched_at": "2026-11-25T03:30:00Z"
 }
 ```
 
-*Trimmed; the values are only an example.* Apple can give several routes;
-the quickest has `is_fastest: true`. Fields Waze fills but Apple doesn't
-(`jams`, `alerts`, `toll`, `traffic_status`) are empty. Apple doesn't
-document how much live traffic its travel time includes, so compare a few
-trips with Waze before relying on it at rush hour.
+*Trimmed; the values are only an example.* The quickest route has
+`is_fastest: true`. Fields Waze fills but Apple doesn't (`jams`, `alerts`,
+`toll`, `traffic_status`) are empty. Apple doesn't document how much live
+traffic its travel time includes.
 
-### The short form
+The short form, for a quick check or an app that only needs the numbers:
 
 ```bash
-curl -s -H "X-Route-Key: $ROUTE_API_KEY" \
-  "http://NAS_IP:8085/directions?origin=KLCC,Kuala%20Lumpur&destination=Beranang,Selangor"
+curl -s -H "X-Route-Key: $APP_KEY" "https://applemap.getcdn.link/directions?origin=KLCC,Kuala%20Lumpur&destination=Beranang,Selangor"
 ```
 
 ```json
 {"status": "success", "origin": "KLCC,Kuala Lumpur", "destination": "Beranang,Selangor",
- "distance_km": 48.21, "duration_minutes": 49.0, "duration_seconds": 2940,
- "route_name": "E7", "source": "apple_maps"}
+ "distance_km": 50.75, "duration_minutes": 53.1, "duration_seconds": 3187,
+ "route_name": "Kajang Dispersal Link Expressway", "source": "apple_maps"}
 ```
 
 ### Errors
 
-As on GET.route:
-
 | Status | When |
 |---|---|
-| 400 | A bad parameter (the answer names the field), or Apple found no route or no such place. |
-| 401 | A wrong or missing `X-Route-Key`. |
-| 503 + `Retry-After` | Apple's quota is used up or `DAILY_LIMIT` is reached. A trip asked in the last 6 hours is answered from memory instead, with `"stale": true`. |
-| 500 | The Apple key is missing or refused, or Apple failed. |
+| 400 | A bad parameter (the answer names the field), or Apple found no route or no such place |
+| 401 | A missing, wrong or revoked key |
+| 429 + `Retry-After` | Over the app's calls a minute |
+| 503 + `Retry-After` | Apple's quota is used up or paused (the service's daily or minute limit, Apple's 429, or the app's own Apple calls a day). A trip asked in the last 6 hours is answered from memory instead, with `"stale": true` |
+| 500 | The Apple key is missing or refused, or Apple failed |
 
 ### Other endpoints
 
 - `GET /health`: always open: `{"status": "ok", "apple_key_configured": true}`.
-  With the key it also shows the last success and error, whether Apple's
-  access token is valid, and today's quota use.
-- `POST /warm`: fetch Apple's access token now. A quick way to check the key.
+  With an app's key it adds the last success and failure (also as `waze`,
+  the block GET.ride's minute-by-minute check reads), the Apple token and
+  today's quota.
+- `POST /warm` (an app's key): fetch Apple's access token now.
+
+## The console (`/admin`)
+
+| Tab | What it is for |
+|---|---|
+| Overview | Calls, share answered, share from the cache, median and 9-in-10 times, calls by hour, by app and by source, Apple's quota today |
+| Request log | The newest 200 calls, or only the failures. No places, coordinates or keys are kept |
+| Apps | One key per app (shown once, stored as a hash), its calls a minute and its own Apple calls a day; replace or revoke a key |
+| Apple | The Apple key's state, the access token and the quota; get a new token, end a quota pause, empty the cache |
+| Try it | One route as an app's call goes; **Ask Apple** skips the cache |
+| Settings | Apple calls a day and a minute, the pause after Apple's 429, the cache, a new app's limit, how long the log is kept |
+| Admins | Console users and their roles: owner, admin, developer, viewer |
+| Audit | Every change and sign-in, by whom; **Check it hasn't been changed** verifies the hash chain |
+
+Sign in with a username and password (scrypt-hashed; 5 wrong tries lock the
+name for 15 minutes) or the admin token (`APPLEMAP_ADMIN_TOKEN`). The first
+time, sign in with the token and create your own user under **Admins**. Put
+`/admin*` behind a Cloudflare Access policy on both addresses.
 
 ## Apple's quota
 
-Apple allows **25,000 Maps Server API calls a day** for the team. The
-service keeps well inside it:
+Apple allows **25,000 Maps Server API calls a day** for the Apple Developer
+team. Each server keeps inside its share:
 
 - a repeat of the same trip within 30 minutes is answered from memory
-  (points within about 100 m count as the same trip);
-- at most `DAILY_LIMIT` (24,000) calls per UTC day; past it, 503s until
-  00:00 UTC (08:00 in Malaysia);
-- after a 429 from Apple, no calls until Apple's `Retry-After`;
-- while paused, recent trips are still answered from memory, marked stale.
+  (points within about 100 m count as the same trip) and costs no call;
+- at most **Apple calls a day** (Settings) per UTC day, 00:00 UTC (08:00 in
+  Malaysia); the count survives restarts;
+- at most **Apple calls a minute** (20 by default), so one busy hour can't
+  use up the day;
+- after Apple's 429, no calls until its `Retry-After`;
+- optionally, an app's own **Apple calls a day** (Apps), so one app can't
+  use another's share.
 
-At ~1,000 GET.ride fare lookups a minute, 25,000 a day runs out quickly
-unless most are repeats or answered by Waze first. `/health` shows
-`calls_today`. Apple can raise the quota on request.
+## Run it on your computer
 
-## Try it on your computer
-
-Python 3.11+, and the Apple key (see the NAS guide, "Get an Apple Maps key"):
+Python 3.10+, and the Apple key:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-APPLE_TEAM_ID=ABCDE12345 APPLE_MAPS_KEY_ID=XYZ9876543 \
-  APPLE_MAPS_KEY_FILE=~/Downloads/AuthKey_XYZ9876543.p8 \
-  uvicorn main:app --port 8000
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 ```
 
-Then `curl "http://localhost:8000/directions?origin=KLCC&destination=Petronas%20Twin%20Towers"`.
-Without `ROUTE_API_KEY` set the API is open: fine on your own computer,
-never behind a tunnel.
+```bash
+APPLEMAP_ADMIN_TOKEN=$(openssl rand -hex 32) APPLEMAP_DATA_DIR=./data APPLE_TEAM_ID=ABCDE12345 APPLE_MAPS_KEY_ID=XYZ9876543 APPLE_MAPS_KEY_FILE=~/Downloads/AuthKey_XYZ9876543.p8 .venv/bin/uvicorn app.main:app --port 8000
+```
+
+Then `http://localhost:8000/admin`, with the token from that shell's history.
 
 ## Tests
 
 ```bash
-python -m unittest test_guard.py test_apple_maps.py test_auth.py test_api.py
+.venv/bin/python -m pytest -q
 ```
 
-They run against a fake Apple Maps Server API (`fake_apple.py`) with a
-throwaway signing key, so they need no Apple account. GitHub Actions
-(`.github/workflows/ci.yml`) runs them on every push and pull request,
-then builds the Docker image and checks that it starts and that the key is
-required.
+They run against a fake Apple Maps Server API with a throwaway signing key,
+so they need no Apple account: the token's signature and renewal, keys and
+revoking, each app's limits, the cache and stale answers, the daily and
+minute quota and Apple's 429, the request log keeping no places, sign-in,
+roles and lockout, settings, Try it, the audit trail's tamper check, the old
+`ROUTE_API_KEY` becoming an app, and the day's count surviving a restart.
+GitHub Actions runs them on every push and pull request, then builds the
+Docker image and checks that it starts.
 
 ## Files
 
 | File | What it does |
 |---|---|
-| `main.py` | The API (FastAPI): parameters, key, cache, calls to Apple, answers |
-| `apple_auth.py` | Signs the Maps auth token with the `.p8` key; gets and renews Apple's access token |
-| `apple_maps.py` | Builds the directions request; turns Apple's answer into GET.route's fields |
-| `guard.py` | Apple's quota: daily cap, optional per-minute cap, pause after a 429 |
-| `config.py` | Every setting, from environment variables |
-| `Dockerfile` | A small Python image (no browser) |
-| `deploy/mac/` | Docker Compose with its own tunnel, `.env.example`, `secrets/`, and the guide for the Mac mini (primary) |
-| `deploy/nas/` | Docker Compose, `.env.example`, `secrets/` for the key, and the setup guide for the NAS (backup) |
+| `app/main.py` | The app: start-up, the console page |
+| `app/routers/api.py` | The API your apps call, and `/health` |
+| `app/service.py` | A lookup: parameters, the cache, the call to Apple, each app's limits |
+| `app/apple_auth.py`, `app/apple_maps.py` | Apple's token (signed with the `.p8` key); the directions request and its answer |
+| `app/guard.py` | Apple's quota: a day, a minute, the pause after a 429 |
+| `app/routers/admin.py`, `app/routers/session.py` | The console's API and sign-in |
+| `app/auth.py`, `app/permissions.py` | Keys, passwords, sessions, roles |
+| `app/db.py`, `app/config.py` | Database (SQLite), settings |
+| `app/static/admin.html` | The console |
+| `deploy/mac/` | The Mac mini: start script, launchd file, `.env.example`, guide |
+| `deploy/nas/` | The NAS: Docker Compose, `.env.example`, guide (including the update from the earlier version) |
 
 ## Security
 
-- The `.p8` key signs requests as your Apple Developer team. Keep it only
-  in `deploy/nas/secrets/` on the NAS (it is mounted read-only and ignored
-  by git) and in your password manager. If it leaks, revoke it in Apple
-  Developer › Keys and make a new one.
-- Every endpoint except `/health` needs `X-Route-Key`.
+- The `.p8` key signs requests as your Apple Developer team. Keep it only in
+  `deploy/*/secrets/` on each machine (git ignores it) and in your password
+  manager. If it leaks, revoke it in Apple Developer › Keys.
+- App keys are stored only as a SHA-256 hash and shown once; revoking one
+  stops it at once. Every endpoint except `/health` needs one.
+- `deploy/*/data/` holds the database; back it up with `.env`.
+- For GET's own apps: Apple's terms apply to how the answers are used.

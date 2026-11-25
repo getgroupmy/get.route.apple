@@ -34,7 +34,7 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python -m unittest -v test_guard.py test_apple_maps.py test_auth.py test_api.py
+        run: python -m pytest -v
 
   docker:
     name: Docker image
@@ -46,30 +46,25 @@ jobs:
       - name: Check the NAS compose file
         working-directory: deploy/nas
         env:
-          ROUTE_API_KEY: ci
           GET_ROUTE_NETWORK: ci-network
           APPLE_TEAM_ID: TEAM123456
           APPLE_MAPS_KEY_ID: KEY1234567
         run: docker compose config --quiet
 
-      - name: Check the Mac mini compose file
-        working-directory: deploy/mac
-        env:
-          ROUTE_API_KEY: ci
-          APPLE_TEAM_ID: TEAM123456
-          APPLE_MAPS_KEY_ID: KEY1234567
-          TUNNEL_TOKEN: ci-token
-        run: docker compose config --quiet
+      - name: Check the Mac mini start script and launchd file
+        run: |
+          bash -n deploy/mac/start.sh
+          python3 -c "import plistlib; plistlib.load(open('deploy/mac/com.getride.applemap.plist','rb'))"
 
       - name: Build the image
         run: docker build -t get-route-apple:ci .
 
       - name: Start it without an Apple key and check it answers
         run: |
-          docker run -d --name apple -p 8000:8000 -e ROUTE_API_KEY=ci get-route-apple:ci
+          docker run -d --name apple -p 8000:8000 -e APPLEMAP_ADMIN_TOKEN=ci-admin-token-ci-admin-token -e ROUTE_API_KEY=ci get-route-apple:ci
           for i in $(seq 1 20); do
             body=$(curl -fsS -H "X-Route-Key: ci" http://127.0.0.1:8000/health || true)
-            if echo "$body" | jq -e '.status == "ok" and .apple_key_configured == false' >/dev/null 2>&1; then
+            if echo "$body" | jq -e '.status == "degraded" and .apple_key_configured == false' >/dev/null 2>&1; then
               echo "$body" | jq .
               exit 0
             fi
@@ -77,6 +72,11 @@ jobs:
           done
           echo "No healthy answer within 20 s. Last /health: $body"
           exit 1
+
+      - name: Check the console opens with the admin token
+        run: |
+          curl -fsS http://127.0.0.1:8000/admin | grep -q "Apple Maps"
+          curl -fsS -H "X-Admin-Token: ci-admin-token-ci-admin-token" http://127.0.0.1:8000/admin/api/clients | jq -e '.[0].name == "GET.ride (ROUTE_API_KEY)"'
 
       - name: Check the key is required, and a missing Apple key is reported
         run: |

@@ -1,177 +1,148 @@
-# GET.route Apple Maps on the Mac mini (primary)
+# GET.route Apple Maps on the Mac mini (applemap.getcdn.link)
 
-The Mac mini is the **primary** Apple Maps server; the NAS runs the same
-service as the **backup**. Both use Apple's official Maps Server API with
-the same Apple key and the same `X-Route-Key`.
+The Mac mini runs the **first** Apple Maps server; the NAS runs the second
+(`applemap2.getcdn.link`, [`../nas/README.md`](../nas/README.md)):
 
 ```
-                         ┌─► route.getride.my      (Waze, NAS)        1st
- GET.ride Fare AI ──────►├─► apple-mac.getride.my  (Apple, Mac mini)  2nd  ◄─ primary
-   (tries in order,      └─► apple.getride.my      (Apple, NAS)       3rd  ◄─ backup
-    next on failure)
-
- apple-mac.getride.my ─ Cloudflare ─► Mac's own tunnel (get-route-apple-tunnel) ─► get-route-apple ─► Apple
+                 ┌─► applemap.getcdn.link   ─ Mac's tunnel ─► Apple Maps on the Mac   http://127.0.0.1:8300   first
+ GET.ride ───────┤
+ other apps      └─► applemap2.getcdn.link  ─ NAS's tunnel ─► Apple Maps on the NAS   (Docker)                second
 ```
 
-**How the failover works.** GET.ride's Fare AI asks its route servers in the
-order they are listed and moves to the next one when a server fails (no
-answer in time, a 5xx, a 503, a wrong key). With the Mac above the NAS, the
-NAS answers only while the Mac is off, asleep, restarting or out of quota.
-Nothing has to be switched by hand, in either direction.
+- **Every day:** apps ask `applemap.getcdn.link`, the Mac.
+- **Mac down** (off, asleep, its tunnel down): apps move on to their second
+  Apple Maps server, `applemap2.getcdn.link`, the NAS.
+- **NAS down:** nothing changes; the Mac answers.
 
-The Mac has **its own Cloudflare Tunnel**, so it works even when the NAS
-(and GET.route's tunnel) is down, and the NAS keeps working when the Mac is.
+The two share nothing: each has its own apps and keys, console users,
+settings, request log and audit trail. A new app gets a key on **each**.
 
-## Apple's quota is shared
+It runs straight on macOS, like GET.route's pool and console on this Mac,
+started by launchd at login. It listens on this Mac only
+(`127.0.0.1:8300`); the Mac's Cloudflare Tunnel (`GET.route Mac`, already
+set up for `waze.getcdn.link`) brings `applemap.getcdn.link` to it.
 
-Apple allows **25,000 calls a day for the whole Apple Developer team**, not
-per machine. Give the primary most of it and keep the total under 25,000:
+## Keep the Mac awake
 
-| Machine | `DAILY_LIMIT` in its `.env` |
-|---|---|
-| Mac mini (primary) | `20000` |
-| NAS (backup) | `4500` |
+If GET.route's set-up on this Mac is done, this is too. Otherwise:
 
-If one machine reaches its cap, it answers 503 and GET.ride moves on, so
-the other still serves until its own cap.
+```bash
+sudo pmset -a sleep 0 disksleep 0 autorestart 1
+```
 
-## What the Mac needs
+And System Settings › Users & Groups › **Automatically log in as** your
+user, so launchd starts the service after a power cut. (Not available with
+FileVault on; then the NAS answers until someone logs in.)
 
-- macOS 13 or later, Apple Silicon or Intel.
-- **Docker Desktop** (https://www.docker.com/products/docker-desktop/) or
-  **OrbStack** (https://orbstack.dev, lighter).
-- About 200 MB of disk and 100 MB of memory (API + tunnel).
-- The Apple key file `AuthKey_5G2GZ7QC7T.p8` from your password manager.
+## 1. Install it
 
-## Keep the Mac awake and running
+```bash
+git clone https://github.com/getgroupmy/get.route.apple.git ~/get.route.apple
+```
 
-A server Mac must not sleep and must come back on its own after a power cut:
+It needs Python 3.10 or later (`python3 --version`; if older, install Python
+from python.org and open a new Terminal window). Then:
 
-1. **System Settings › Energy** (or *Energy Saver*): turn on **Prevent
-   automatic sleeping when the display is off** and **Start up
-   automatically after a power failure**. Or in Terminal:
+```bash
+cd ~/get.route.apple && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
 
-   ```bash
-   sudo pmset -a sleep 0 disksleep 0 autorestart 1
-   ```
+## 2. The Apple key
 
-2. **Docker starts at login:** Docker Desktop › Settings › General ›
-   **Start Docker Desktop when you sign in** (OrbStack: Settings › **Start
-   at login**).
-3. **Log in automatically after a restart**, so Docker starts: System
-   Settings › Users & Groups › **Automatically log in as** › your user.
-   (Not available while FileVault is on; then someone must log in after a
-   power cut, and the NAS covers until they do.)
+The same key as the NAS. From your password manager (or the Downloads
+folder), with your Key ID in place of `XXXXXXXXXX`:
 
-The containers have `restart: unless-stopped`, so they start whenever
-Docker does.
+```bash
+cp ~/Downloads/AuthKey_XXXXXXXXXX.p8 ~/get.route.apple/deploy/mac/secrets/apple_maps.p8 && chmod 600 ~/get.route.apple/deploy/mac/secrets/apple_maps.p8
+```
 
-## Set it up
+Then delete the copy in Downloads.
 
-1. **Get the code** (Terminal on the Mac mini):
+## 3. Its settings
 
-   ```bash
-   git clone https://github.com/getgroupmy/get.route.apple.git ~/get-route-apple
-   ```
+This makes the admin token on the Mac without showing it. Put your Team ID
+and Key ID (the same as on the NAS) in place of the two `X`s:
 
-2. **Put the Apple key in place**, the same file as on the NAS:
+```bash
+cd ~/get.route.apple/deploy/mac && sed "s/^APPLEMAP_ADMIN_TOKEN=.*/APPLEMAP_ADMIN_TOKEN=$(openssl rand -hex 32)/" .env.example > .env && chmod 600 .env && open -e .env
+```
 
-   ```bash
-   cp ~/Downloads/AuthKey_5G2GZ7QC7T.p8 ~/get-route-apple/deploy/mac/secrets/apple_maps.p8 && chmod 600 ~/get-route-apple/deploy/mac/secrets/apple_maps.p8
-   ```
+In TextEdit, fill in `APPLE_TEAM_ID=` and `APPLE_MAPS_KEY_ID=`, then save.
 
-   Then delete the copy in Downloads (keep it in your password manager).
+Port 8300 must be free (nothing printed):
 
-3. **Create the Mac's tunnel in Cloudflare:** Zero Trust › Networks ›
-   Tunnels › **Create a tunnel** › **Cloudflared** › name it
-   `get-route-apple-mac` › Save. On the install page choose **Docker** and
-   copy the long token after `--token` (don't run the command shown).
-   Then **Next** › add a public hostname (published application route):
+```bash
+lsof -nP -iTCP:8300 -sTCP:LISTEN
+```
 
-   | Field | Value |
-   |---|---|
-   | Subdomain | `apple-mac` |
-   | Domain | `getride.my` |
-   | Service | **HTTP**, URL `get-route-apple:8000` |
+If something uses it, change `APPLEMAP_PORT` in `.env` and use that port below.
 
-   Save.
+## 4. Start it at login
 
-4. **Make `.env`:**
+```bash
+mkdir -p ~/get.route.apple/deploy/mac/logs && sed "s|/Users/YOU/get.route.apple|$HOME/get.route.apple|g" ~/get.route.apple/deploy/mac/com.getride.applemap.plist > ~/Library/LaunchAgents/com.getride.applemap.plist && launchctl load -w ~/Library/LaunchAgents/com.getride.applemap.plist
+```
 
-   ```bash
-   cd ~/get-route-apple/deploy/mac && cp .env.example .env && open -e .env
-   ```
+```bash
+sleep 5; curl -s http://127.0.0.1:8300/health; echo
+```
 
-   Fill in `ROUTE_API_KEY`, `APPLE_TEAM_ID`, `APPLE_MAPS_KEY_ID` with the
-   **same values as the NAS** (on the NAS: `sudo grep -E
-   '^(ROUTE_API_KEY|APPLE_)' /volume1/docker/get-route-apple/deploy/nas/.env`),
-   and `TUNNEL_TOKEN` with the token from step 3. Save.
+`{"status":"ok", ..., "apple_key_configured":true}`.
 
-5. **Start it:**
+## 5. Its address
 
-   ```bash
-   cd ~/get-route-apple/deploy/mac && docker compose up -d --build
-   ```
+1. Cloudflare Zero Trust › Networks › Tunnels › **GET.route Mac** › Public
+   hostnames › **Add**: `applemap.getcdn.link` → **HTTP** `localhost:8300`.
+   (No `GET.route Mac` tunnel yet? Create one: **Create a tunnel ›
+   Cloudflared**, choose **macOS**, then `brew install cloudflared` and
+   `sudo cloudflared service install THE_TOKEN`.)
+2. Protect the console: Zero Trust › Access › Applications › **Add** a
+   self-hosted application for `applemap.getcdn.link` with path `admin*`,
+   allowing only your team, as for `waze.getcdn.link`.
+3. Check from anywhere: `https://applemap.getcdn.link/health`.
 
-6. **Check it on the Mac:**
+## 6. Set the console up
 
-   ```bash
-   curl -s -X POST -H "X-Route-Key: $(grep '^ROUTE_API_KEY=' .env | cut -d= -f2)" http://localhost:8085/warm; echo
-   ```
+Open `https://applemap.getcdn.link/admin` (or `http://127.0.0.1:8300/admin`
+on the Mac). The first time, **Use admin token instead**:
 
-   `{"token_valid_seconds": …}` means Apple accepted the key. Then a lookup:
+```bash
+grep ^APPLEMAP_ADMIN_TOKEN ~/get.route.apple/deploy/mac/.env | cut -d= -f2 | tr -d '\n' | pbcopy && echo "token copied"
+```
 
-   ```bash
-   curl -s -H "X-Route-Key: $(grep '^ROUTE_API_KEY=' .env | cut -d= -f2)" "http://localhost:8085/directions?origin=KLCC,Kuala%20Lumpur&destination=Beranang,Selangor"; echo
-   ```
+1. **Admins**: your own user (role **owner**); sign in with it from now on.
+2. **Apple**: the key shows **accepted**.
+3. **Settings**: Apple calls a day **20,000**. On the NAS console
+   (`applemap2.getcdn.link/admin` › Settings) set **4,500**, so the two stay
+   under Apple's 25,000 a day.
+4. **Apps**: **Create key** `GET.ride fares`, and copy it.
 
-7. **Let `apple-mac` past GET.ride's subdomain worker**, as for `apple`:
-   add `apple-mac` to `PASS_THROUGH` in all three places: the live worker
-   (`getride-subdomain-proxy` › Settings › Variables), the get-ride
-   repository variable `SUBDOMAIN_PROXY_PASS_THROUGH`, and
-   `cloudflare/subdomain-proxy/wrangler.toml` (e.g.
-   `links,send,stats,route,traffic,apple,apple-mac`). Then check from
-   anywhere: `https://apple-mac.getride.my/health` answers
-   `{"status":"ok", ...}` (the GET.ride web page means step 7 isn't live yet).
+## 7. Point GET.ride at both
 
-8. **Give the NAS its backup share of the quota.** On the NAS:
+GET.ride › Admin › Settings › **Fare AI provider** › Apple Maps servers:
 
-   ```bash
-   cd /volume1/docker/get-route-apple/deploy/nas && sudo sed -i 's/^DAILY_LIMIT=.*/DAILY_LIMIT=4500/' .env && (sudo grep -q '^DAILY_LIMIT=' .env || echo 'DAILY_LIMIT=4500' | sudo tee -a .env) && sudo docker compose up -d
-   ```
+1. `https://applemap.getcdn.link` with the Mac console's GET.ride key, **first**.
+2. `https://applemap2.getcdn.link` with the NAS console's GET.ride key, **second**.
 
-9. **Order the servers in GET.ride:** Admin › Settings › **Fare AI
-   provider**: add a server for `https://apple-mac.getride.my` with the same
-   key, **Test**, and put it **above** `https://apple.getride.my` (the NAS):
-   Waze → **Apple (Mac)** → Apple (NAS). **Save changes.**
+**Test** each, then **Save changes**. Other apps (GET.teksi, …) get a key
+from each console the same way.
 
 ## Test the failover
 
-1. Stop the Mac's API: `docker compose stop get-route-apple` (in
-   `~/get-route-apple/deploy/mac`). `https://apple-mac.getride.my/health`
-   now fails (502).
-2. Look up a fare in GET.ride. It still gets an Apple answer, now from the
-   NAS: on the NAS, `/health` with the key shows `calls_today` go up.
-3. Start it again: `docker compose start get-route-apple`. New lookups go
-   to the Mac again.
+1. Stop it on the Mac: `launchctl unload ~/Library/LaunchAgents/com.getride.applemap.plist`.
+2. Look up a fare in GET.ride: it still gets an Apple answer, now from the
+   NAS (its console's **Request log** shows the call).
+3. Start it again: `launchctl load -w ~/Library/LaunchAgents/com.getride.applemap.plist`.
 
-## Updating
+## Check and update
 
-```bash
-cd ~/get-route-apple && git pull && cd deploy/mac && docker compose up -d --build
-```
+- Logs: `~/get.route.apple/deploy/mac/logs/applemap.log`.
+- Update:
 
-Update the NAS the same way (`git pull`, then `sudo docker compose up -d
---build` in `deploy/nas`) so both run the same version. Update one at a
-time: while one rebuilds, the other answers.
+  ```bash
+  cd ~/get.route.apple && git pull && .venv/bin/pip install -q -r requirements.txt && launchctl kickstart -k gui/$(id -u)/com.getride.applemap
+  ```
 
-## When something fails
-
-| What you see | Fix |
-|---|---|
-| `apple-mac.getride.my` shows the GET.ride web page | Step 7: `apple-mac` isn't in the subdomain worker's pass-through list yet. |
-| 502 / Error 1033 on `apple-mac.getride.my` | The Mac, Docker or its tunnel is down: `docker compose ps` in `deploy/mac`; check the Mac is awake and Docker is running. |
-| `Apple refused the Maps key (401)` | `APPLE_TEAM_ID` / `APPLE_MAPS_KEY_ID` / the key file differ from the NAS's working ones. |
-| 503 `DAILY_LIMIT` | The Mac used its 20,000 for the day; the NAS takes over until 00:00 UTC (08:00 Malaysia). |
-
-Logs: `docker logs --tail 50 get-route-apple` and `docker logs --tail 20 get-route-apple-tunnel`.
+  Update the NAS the same day so both run the same version.
+- Back up `~/get.route.apple/deploy/mac/data/` and `.env` (Time Machine
+  covers both).

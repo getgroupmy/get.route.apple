@@ -15,9 +15,15 @@ env/
 .DS_Store
 Thumbs.db
 
+# The database (apps' key hashes, users, logs)
+data/
+
 # Local secrets: never commit .env or an Apple key
 .env
 *.p8
 deploy/*/secrets/*
 # ...but keep the key folders (Synology's Docker won't create them itself)
 !deploy/*/secrets/.gitkeep
+
+# The Mac's logs
+deploy/mac/logs/
