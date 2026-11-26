@@ -4,7 +4,7 @@ The Mac mini runs the **first** Apple Maps server; the NAS runs the second
 (`applemap2.getcdn.link`, [`../nas/README.md`](../nas/README.md)):
 
 ```
-                 ┌─► applemap.getcdn.link   ─ Mac's tunnel ─► Apple Maps on the Mac   http://127.0.0.1:8300   first
+                 ┌─► applemap.getcdn.link   ─ Mac's tunnel ─► Apple Maps on the Mac   http://127.0.0.1:8400   first
  GET.ride ───────┤
  other apps      └─► applemap2.getcdn.link  ─ NAS's tunnel ─► Apple Maps on the NAS   (Docker)                second
 ```
@@ -19,8 +19,17 @@ settings, request log and audit trail. A new app gets a key on **each**.
 
 It runs straight on macOS, like GET.route's pool and console on this Mac,
 started by launchd at login. It listens on this Mac only
-(`127.0.0.1:8300`); the Mac's Cloudflare Tunnel (`GET.route Mac`, already
+(`127.0.0.1:8400`); the Mac's Cloudflare Tunnel (`GET.route Mac`, already
 set up for `waze.getcdn.link`) brings `applemap.getcdn.link` to it.
+
+The office Mac mini's ports, all on `127.0.0.1` only:
+
+| Port | Service | Address |
+|---|---|---|
+| 8100 | GET.route Waze pool | (the Waze console's first server) |
+| 8200 | GET.route Waze console | `waze.getcdn.link` |
+| 8300 | Google Maps console | `gmap.getcdn.link` |
+| **8400** | **Apple Maps (this)** | **`applemap.getcdn.link`** |
 
 ## Keep the Mac awake
 
@@ -69,10 +78,10 @@ cd ~/get.route.apple/deploy/mac && sed "s/^APPLEMAP_ADMIN_TOKEN=.*/APPLEMAP_ADMI
 
 In TextEdit, fill in `APPLE_TEAM_ID=` and `APPLE_MAPS_KEY_ID=`, then save.
 
-Port 8300 must be free (nothing printed):
+Port 8400 must be free (nothing printed):
 
 ```bash
-lsof -nP -iTCP:8300 -sTCP:LISTEN
+lsof -nP -iTCP:8400 -sTCP:LISTEN
 ```
 
 If something uses it, change `APPLEMAP_PORT` in `.env` and use that port below.
@@ -84,7 +93,7 @@ mkdir -p ~/get.route.apple/deploy/mac/logs && sed "s|/Users/YOU/get.route.apple|
 ```
 
 ```bash
-sleep 5; curl -s http://127.0.0.1:8300/health; echo
+sleep 5; curl -s http://127.0.0.1:8400/health; echo
 ```
 
 `{"status":"ok", ..., "apple_key_configured":true}`.
@@ -92,10 +101,21 @@ sleep 5; curl -s http://127.0.0.1:8300/health; echo
 ## 5. Its address
 
 1. Cloudflare Zero Trust › Networks › Tunnels › **GET.route Mac** › Public
-   hostnames › **Add**: `applemap.getcdn.link` → **HTTP** `localhost:8300`.
+   hostnames › **Add**: `applemap.getcdn.link` → **HTTP** `localhost:8400`.
    (No `GET.route Mac` tunnel yet? Create one: **Create a tunnel ›
    Cloudflared**, choose **macOS**, then `brew install cloudflared` and
    `sudo cloudflared service install THE_TOKEN`.)
+
+   It must be the tunnel that has `waze.getcdn.link` and `gmap.getcdn.link`.
+   Check the Mac's tunnel took it (the list includes `applemap.getcdn.link`):
+
+   ```bash
+   sudo grep -ho '"hostname[^,]*getcdn.link' /Library/Logs/com.cloudflare.cloudflared.*.log | sort -u
+   ```
+
+   And in the `getcdn.link` zone › DNS, `applemap` must be a CNAME with the
+   **same target as `waze`** (the Mac's tunnel), not `waze2` (the NAS's). An
+   empty 404 from Cloudflare means the name reached a tunnel without it.
 2. Protect the console: Zero Trust › Access › Applications › **Add** a
    self-hosted application for `applemap.getcdn.link` with path `admin*`,
    allowing only your team, as for `waze.getcdn.link`.
@@ -103,7 +123,7 @@ sleep 5; curl -s http://127.0.0.1:8300/health; echo
 
 ## 6. Set the console up
 
-Open `https://applemap.getcdn.link/admin` (or `http://127.0.0.1:8300/admin`
+Open `https://applemap.getcdn.link/admin` (or `http://127.0.0.1:8400/admin`
 on the Mac). The first time, **Use admin token instead**:
 
 ```bash
