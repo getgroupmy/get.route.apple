@@ -26,5 +26,5 @@ mkdir -p "$APPLEMAP_DATA_DIR" "$HERE/logs"
 chmod 700 "$APPLEMAP_DATA_DIR"
 
 cd "$REPO"
-exec "$REPO/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "${APPLEMAP_PORT:-8300}" \
+exec "$REPO/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "${APPLEMAP_PORT:-8400}" \
   --no-access-log --proxy-headers --forwarded-allow-ips 127.0.0.1
